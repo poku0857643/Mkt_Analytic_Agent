@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     # role -> datasets that role may query.
     role_datasets: dict[str, list[str]] = {}
 
+    # Fully qualified "dataset.table.column" names that must never be queried.
+    pii_columns: list[str] = []
+
+    # Upper bound on bytes a single query may scan (dry-run check and
+    # maximum_bytes_billed on real jobs). Default 1 GiB.
+    max_bytes_billed: int = 1024**3
+
 
 @lru_cache
 def get_settings() -> Settings:

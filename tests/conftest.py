@@ -25,6 +25,7 @@ def settings() -> Settings:
             "analyst": ["marketing"],
             "admin": ["marketing", "customers"],
         },
+        pii_columns=["customers.customers.email", "customers.customers.phone"],
     )
 
 
