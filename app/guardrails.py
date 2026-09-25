@@ -106,7 +106,8 @@ def _check_pii(ast: exp.Expression, tables: list[exp.Table], pii_columns: list[s
         if {table.name.lower(), table.alias_or_name.lower()} & column_names:
             return f"Selecting whole rows of {key} is not allowed: it contains PII"
 
-    if ast.find(exp.Star):
+    # COUNT(*) only counts rows; any other * can return column values.
+    if any(not isinstance(star.parent, exp.Count) for star in ast.find_all(exp.Star)):
         names = ", ".join(sorted(f"{t.db}.{t.name}" for t in pii_tables))
         return f"SELECT * is not allowed on tables with PII ({names}); list the columns"
     return ""

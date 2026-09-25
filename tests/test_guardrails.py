@@ -121,6 +121,23 @@ def test_pii_rejected(sql):
     assert "pii" in decision.reason.lower()
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT COUNT(*) FROM customers.customers",
+        "SELECT country, COUNT(*) AS n FROM customers.customers GROUP BY country",
+    ],
+)
+def test_count_star_on_pii_table_is_allowed(sql):
+    decision = check(sql, datasets=("customers",))
+    assert decision.approved, decision.reason
+
+
+def test_count_star_does_not_hide_select_star():
+    decision = check("SELECT *, COUNT(*) OVER () FROM customers.customers", ("customers",))
+    assert not decision.approved
+
+
 def test_non_pii_columns_of_pii_table_are_allowed():
     decision = check(
         "SELECT id, signup_date FROM customers.customers", datasets=("customers",)
