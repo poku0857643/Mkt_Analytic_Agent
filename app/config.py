@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # maximum_bytes_billed on real jobs). Default 1 GiB.
     max_bytes_billed: int = 1024**3
 
+    # Rows returned to the agent per query; keeps LLM context small.
+    max_result_rows: int = 500
+
+    # Seconds to wait for a query to finish.
+    query_timeout_seconds: float = 60.0
+
+    # Datasets for the standalone MCP server (python -m app.mcp_server).
+    # Inside the API, each request uses the caller's role datasets instead.
+    mcp_allowed_datasets: list[str] = []
+
 
 @lru_cache
 def get_settings() -> Settings:
