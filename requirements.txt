@@ -1,0 +1,7 @@
+fastapi>=0.141,<1
+uvicorn>=0.53,<1
+pydantic-settings>=2.15,<3
+sqlglot>=30.19,<31
+google-cloud-bigquery>=3.45,<4
+mcp>=2.2,<3
+anthropic>=1.8,<2

@@ -1,11 +1,20 @@
 # Test your FastAPI endpoints
 
-GET http://127.0.0.1:8000/
+GET http://127.0.0.1:8000/health
 Accept: application/json
 
 ###
 
-GET http://127.0.0.1:8000/hello/User
+# Replace with a key whose sha256 digest is in API_KEYS (see scripts/hash_key.py)
+GET http://127.0.0.1:8000/whoami
 Accept: application/json
+X-API-Key: your-api-key
+
+###
+POST http://127.0.0.1:8000/ask
+Content-Type: application/json
+X-API-Key: your-api-key
+
+{"question": "Which channel drove the most revenue last quarter?"}
 
 ###

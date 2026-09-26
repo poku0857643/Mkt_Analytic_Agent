@@ -12,6 +12,12 @@ __pycache__/
 # Environment / secrets
 .env
 .env.*
+!.env.example
 
 # OS
 .DS_Store
+
+# memo
+/memo
+# Audit logs
+logs/
