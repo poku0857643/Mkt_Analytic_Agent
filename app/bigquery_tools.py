@@ -59,6 +59,8 @@ class BigQueryTools:
         self.max_rows = max_rows
         self.timeout = timeout
         self.estimator = DryRunEstimator(client)
+        # Running total, so callers can charge scans even if the agent later fails.
+        self.bytes_processed = 0
 
     def _require_dataset(self, dataset: str) -> None:
         if dataset not in self.allowed_datasets:
@@ -118,6 +120,7 @@ class BigQueryTools:
         rows = list(job.result(max_results=self.max_rows + 1, timeout=self.timeout))
         truncated = len(rows) > self.max_rows
         rows = rows[: self.max_rows]
+        self.bytes_processed += job.total_bytes_processed or 0
 
         return {
             "tables": decision.tables,

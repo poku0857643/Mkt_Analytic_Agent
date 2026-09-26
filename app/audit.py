@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Protocol
 
-Outcome = Literal["answered", "limitation", "denied", "error"]
+Outcome = Literal["answered", "limitation", "denied", "rate_limited", "over_budget", "error"]
 
 
 @dataclass

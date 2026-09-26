@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     # Hard cap on model turns per question.
     agent_max_turns: int = 12
 
+    # Per-user limits on /ask (in memory, per server instance).
+    ask_rate_limit_per_minute: int = 10
+    user_daily_bytes_limit: int = 10 * 1024**3
+
+    # Seconds before /ask gives up and returns 504.
+    ask_timeout_seconds: float = 180.0
+
     # Where /ask audit records go: a JSON-lines file, or "-" for stdout (Cloud Run).
     audit_log_path: str = "logs/audit.jsonl"
 

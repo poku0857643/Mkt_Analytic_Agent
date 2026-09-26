@@ -6,8 +6,16 @@ import httpx
 import pytest
 
 from app.agent import AnalyticsAgent
-from app.api import app, get_agent, get_audit_log, get_bigquery_client
+from app.api import (
+    app,
+    get_agent,
+    get_audit_log,
+    get_bigquery_client,
+    get_rate_limiter,
+    get_scan_budget,
+)
 from app.audit import JsonLinesAuditLog
+from app.limits import DailyScanBudget, RateLimiter
 from tests.conftest import ADMIN_KEY, ANALYST_KEY, NO_ACCESS_KEY
 from tests.fake_bigquery import FakeClient
 from tests.test_agent import ANSWER, GOOD_SQL, FakeAnthropic, final, query
@@ -29,6 +37,8 @@ class Harness:
         self.audit = MemoryAuditLog()
         self.bq = FakeClient()
         self.claude = None
+        self.limiter = RateLimiter(limit=100)
+        self.budget = DailyScanBudget(limit_bytes=10**9, today=lambda: "2026-09-26")
 
     def script(self, *responses):
         self.claude = FakeAnthropic(responses)
@@ -45,6 +55,9 @@ def h(client):
     harness = Harness(client)
     app.dependency_overrides[get_audit_log] = lambda: harness.audit
     app.dependency_overrides[get_bigquery_client] = lambda: harness.bq
+    # Fresh limits per test; the process-wide ones would leak between tests.
+    app.dependency_overrides[get_rate_limiter] = lambda: harness.limiter
+    app.dependency_overrides[get_scan_budget] = lambda: harness.budget
     harness.script()  # no Claude calls unless a test scripts them
     return harness
 
@@ -195,3 +208,84 @@ def test_json_lines_audit_log(tmp_path):
         "detail": "",
         "bytes_processed": 10,
     }
+
+
+# Rate limit, daily scan budget, timeout
+
+
+def test_rate_limited_after_limit(h):
+    h.limiter = RateLimiter(limit=2, clock=lambda: 1000.0)
+    h.script(final(), final())
+    assert h.ask().status_code == 200
+    assert h.ask().status_code == 200
+
+    response = h.ask()
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "60"
+    assert h.audit.records[-1].outcome == "rate_limited"
+    assert h.audit.records[-1].http_status == 429
+    assert len(h.claude.requests) == 2  # the third question never reached Claude
+
+
+def test_rate_limit_is_per_user(h):
+    h.limiter = RateLimiter(limit=1, clock=lambda: 1000.0)
+    h.script(final(), final())
+    assert h.ask(key=ANALYST_KEY).status_code == 200
+    assert h.ask(key=ADMIN_KEY).status_code == 200
+    assert h.ask(key=ANALYST_KEY).status_code == 429
+
+
+def test_scanned_bytes_are_charged_to_the_user(h):
+    h.script(query(GOOD_SQL, "t1"), final())
+    h.ask()
+    assert h.budget.remaining("ana") == 10**9 - 12_345
+    assert h.budget.remaining("adam") == 10**9
+
+
+def test_over_budget_is_429_and_audited(h):
+    h.budget.add("ana", 10**9)
+    response = h.ask()
+    assert response.status_code == 429
+    assert "resets at 00:00 UTC" in response.json()["detail"]
+    assert h.audit.records[-1].outcome == "over_budget"
+    assert h.claude.requests == []
+
+
+def test_query_capped_by_remaining_budget(h):
+    # 500 bytes left today; the dry run estimates 1,000 -> rejected, not run.
+    h.budget.add("ana", 10**9 - 500)
+    limitation = {"status": "limitation", "summary": "Over budget.", "chart": None}
+    h.script(query(GOOD_SQL, "t1"), final(limitation))
+    body = h.ask().json()
+
+    assert body["status"] == "limitation"
+    assert h.bq.executed == []
+    assert "byte limit" in h.audit.records[-1].queries[0].detail
+
+
+def test_timeout_is_504_and_charges_bytes_already_scanned(h, settings):
+    import asyncio
+
+    settings.ask_timeout_seconds = 0.2
+
+    class Slow:
+        def __init__(self, inner):
+            self.inner = inner
+            self.calls = 0
+
+        async def create(self, **kwargs):
+            self.calls += 1
+            if self.calls == 2:
+                await asyncio.sleep(5)
+            return await self.inner.create(**kwargs)
+
+    h.script(query(GOOD_SQL, "t1"), final())
+    h.claude.beta.messages = Slow(h.claude.beta.messages)
+    response = h.ask()
+
+    assert response.status_code == 504
+    record = h.audit.records[-1]
+    assert record.outcome == "error"
+    assert record.http_status == 504
+    assert record.total_bytes_processed == 12_345
+    assert h.budget.remaining("ana") == 10**9 - 12_345

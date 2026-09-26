@@ -1,3 +1,5 @@
+import asyncio
+import math
 import time
 import uuid
 from functools import lru_cache
@@ -13,6 +15,7 @@ from app.audit import AuditLog, AuditQuery, AuditRecord, JsonLinesAuditLog
 from app.auth import User, api_key_header, get_current_user, hash_key
 from app.bigquery_tools import BigQueryTools
 from app.config import Settings, get_settings
+from app.limits import DailyScanBudget, RateLimiter
 from app.mcp_server import build_server
 
 app = FastAPI(title="Marketing Analytics Agent")
@@ -47,6 +50,24 @@ def _audit_log(path: str) -> JsonLinesAuditLog:
 
 def get_audit_log(settings: Annotated[Settings, Depends(get_settings)]) -> AuditLog:
     return _audit_log(settings.audit_log_path)
+
+
+@lru_cache
+def _rate_limiter(limit: int) -> RateLimiter:
+    return RateLimiter(limit, window=60.0)
+
+
+def get_rate_limiter(settings: Annotated[Settings, Depends(get_settings)]) -> RateLimiter:
+    return _rate_limiter(settings.ask_rate_limit_per_minute)
+
+
+@lru_cache
+def _scan_budget(limit_bytes: int) -> DailyScanBudget:
+    return DailyScanBudget(limit_bytes)
+
+
+def get_scan_budget(settings: Annotated[Settings, Depends(get_settings)]) -> DailyScanBudget:
+    return _scan_budget(settings.user_daily_bytes_limit)
 
 
 # Routes
@@ -101,7 +122,6 @@ def _audit_from_result(record: AuditRecord, result: AgentResult) -> None:
     record.queries = [
         AuditQuery(q.sql, q.approved, q.detail, q.bytes_processed) for q in result.queries
     ]
-    record.total_bytes_processed = sum(q.bytes_processed for q in result.queries)
     record.turns = result.turns
     record.input_tokens = result.input_tokens
     record.cache_read_tokens = result.cache_read_tokens
@@ -117,6 +137,8 @@ async def ask(
     bq: Annotated[bigquery.Client, Depends(get_bigquery_client)],
     agent: Annotated[AnalyticsAgent, Depends(get_agent)],
     audit: Annotated[AuditLog, Depends(get_audit_log)],
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    budget: Annotated[DailyScanBudget, Depends(get_scan_budget)],
 ) -> AskResponse:
     started = time.monotonic()
     record = AuditRecord(
@@ -128,19 +150,46 @@ async def ask(
         question=body.question,
     )
 
+    retry_after = limiter.check(user.user)
+    if retry_after is not None:
+        record.outcome, record.http_status = "rate_limited", status.HTTP_429_TOO_MANY_REQUESTS
+        audit.write(record)
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many questions. Please wait a moment.",
+            headers={"Retry-After": str(math.ceil(retry_after))},
+        )
+
+    remaining = budget.remaining(user.user)
+    if remaining <= 0:
+        record.outcome, record.http_status = "over_budget", status.HTTP_429_TOO_MANY_REQUESTS
+        audit.write(record)
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Daily data scan limit reached. It resets at 00:00 UTC.",
+        )
+
     # The allowlist comes from the caller's role, never from the request.
+    # A single query may not scan more than the user has left today.
     tools = BigQueryTools(
         client=bq,
         project=settings.gcp_project,
         allowed_datasets=user.allowed_datasets,
         pii_columns=settings.pii_columns,
-        max_bytes=settings.max_bytes_billed,
+        max_bytes=min(settings.max_bytes_billed, remaining),
         max_rows=settings.max_result_rows,
         timeout=settings.query_timeout_seconds,
     )
 
     try:
-        result = await agent.ask(body.question, build_server(tools), user.allowed_datasets)
+        async with asyncio.timeout(settings.ask_timeout_seconds):
+            result = await agent.ask(body.question, build_server(tools), user.allowed_datasets)
+    except TimeoutError as e:
+        record.http_status = status.HTTP_504_GATEWAY_TIMEOUT
+        record.error = f"Timed out after {settings.ask_timeout_seconds:g}s"
+        raise HTTPException(
+            status.HTTP_504_GATEWAY_TIMEOUT, "The question took too long. Try a narrower question."
+        ) from e
     except anthropic.APIError as e:
         record.http_status = status.HTTP_502_BAD_GATEWAY
         record.error = f"{type(e).__name__}: {e}"[:500]
@@ -157,6 +206,9 @@ async def ask(
         record.outcome = result.answer.status
         record.http_status = status.HTTP_200_OK
     finally:
+        # Charge every byte scanned, including queries run before a failure.
+        budget.add(user.user, tools.bytes_processed)
+        record.total_bytes_processed = tools.bytes_processed
         record.duration_ms = int((time.monotonic() - started) * 1000)
         audit.write(record)
 

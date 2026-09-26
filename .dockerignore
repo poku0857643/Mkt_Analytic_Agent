@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.venv
+.env
+.env.*
+!.env.example
+**/__pycache__
+logs
+memo
+tests
+scripts
+*.http
+Dockerfile
+.dockerignore
