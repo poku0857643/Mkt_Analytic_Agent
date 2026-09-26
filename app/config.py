@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +37,20 @@ class Settings(BaseSettings):
     # Datasets for the standalone MCP server (python -m app.mcp_server).
     # Inside the API, each request uses the caller's role datasets instead.
     mcp_allowed_datasets: list[str] = []
+
+    # Read from .env; the SDK itself only sees real environment variables.
+    # When unset, the SDK falls back to its own credential resolution.
+    anthropic_api_key: SecretStr | None = None
+
+    # Claude model and effort used by the analytics agent.
+    agent_model: str = "claude-opus-5"
+    agent_effort: str = "high"
+
+    # Rejected execute_query calls allowed before the agent must explain instead.
+    agent_max_query_retries: int = 3
+
+    # Hard cap on model turns per question.
+    agent_max_turns: int = 12
 
 
 @lru_cache
