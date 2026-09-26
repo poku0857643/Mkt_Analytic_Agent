@@ -3,10 +3,13 @@ import math
 import time
 import uuid
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
 import anthropic
-from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from google.cloud import bigquery
 from pydantic import BaseModel, Field
 
@@ -19,6 +22,29 @@ from app.limits import DailyScanBudget, RateLimiter
 from app.mcp_server import build_server
 
 app = FastAPI(title="Marketing Analytics Agent")
+
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# The web UI loads nothing from other origins. /docs (Swagger) is left alone
+# because it pulls its assets from a CDN.
+UI_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; "
+    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Question text can appear in UI links (?q=); don't leak it to other sites.
+    response.headers["Referrer-Policy"] = "no-referrer"
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Content-Security-Policy"] = UI_CSP
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 # Shared clients, built once per process. Tests override these dependencies.
@@ -71,6 +97,12 @@ def get_scan_budget(settings: Annotated[Settings, Depends(get_settings)]) -> Dai
 
 
 # Routes
+
+
+@app.get("/", include_in_schema=False)
+async def web_ui():
+    """Browser UI for non-technical users; it calls /whoami and /ask."""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health")

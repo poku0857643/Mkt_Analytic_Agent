@@ -18,6 +18,7 @@ POST /ask  {"question": "Which channel drove the most revenue, and what was ROAS
 - [How it works](#how-it-works)
 - [Security model](#security-model)
 - [Quick start](#quick-start)
+- [Web app](#web-app)
 - [Using the API](#using-the-api)
 - [Configuration](#configuration)
 - [Testing](#testing)
@@ -159,7 +160,8 @@ gcloud auth application-default login
 .venv/bin/uvicorn main:app --reload
 ```
 
-Open http://127.0.0.1:8000/docs for interactive API docs. Click **Authorize** and paste
+Open http://127.0.0.1:8000 for the [web app](#web-app), or
+http://127.0.0.1:8000/docs for interactive API docs. Click **Authorize** and paste
 an API key to try the endpoints.
 
 Minimal `.env`:
@@ -173,6 +175,43 @@ PII_COLUMNS=["customers.customers.email", "customers.customers.phone"]
 ```
 
 No data yet? [Seed the sandbox datasets](#sandbox-data).
+
+## Web app
+
+For people who don't use the command line, the API serves a browser app at `/`. Give
+each person the site's address and their API key; nothing needs installing.
+
+1. **Sign in** by pasting the key. Ticking *Keep me signed in* keeps it in this
+   browser; otherwise it's forgotten when the tab closes.
+2. **Ask** in plain English, or click one of the example questions (they match the
+   datasets the person's role can use).
+3. **Read the answer**: a short summary, a chart when it helps, and the numbers as a
+   table. *Partly answered* means the data or the security rules didn't allow a full
+   answer; the summary says why.
+4. **Use it in your work**:
+
+   | Button | Gives you |
+   |---|---|
+   | Copy answer | Question, summary, figures and a reference, ready to paste into email, docs or chat |
+   | Download for Excel (.csv) | The chart's numbers, for Excel or Google Sheets |
+   | Download chart image (.png) | A titled, high-resolution chart for slides and reports |
+   | Copy link to this question | A link that opens the app with the question filled in (not run) for a colleague |
+
+5. **Check the working** under *How was this worked out?*: the SQL that ran, how much
+   data it read, and a reference ID that matches the audit log.
+
+Recent questions and their answers stay in the sidebar, stored only in that browser
+(same lifetime as the key). Errors are explained in plain words, for example the
+per-minute limit with a wait time, the daily data allowance, or a timeout with a hint
+to narrow the question.
+
+The app is plain HTML, CSS and JavaScript in `app/static/`, with no build step and
+nothing loaded from other sites. It only calls `/whoami` and `/ask`, so every API
+protection still applies. The page and its files are sent with a strict
+Content-Security-Policy (same-origin scripts, styles and connections; no framing),
+and server text is always inserted as text, never as HTML. Downloaded CSV cells
+that start with `=`, `+`, `-` or `@` are prefixed with `'` so spreadsheets don't run
+them as formulas.
 
 ## Using the API
 
@@ -222,6 +261,7 @@ curl -X POST http://127.0.0.1:8000/ask \
 
 ### Other endpoints
 
+- `GET /`: the [web app](#web-app), no auth for the page itself.
 - `GET /health`: liveness check, no auth.
 - `GET /whoami`: shows the user, role and datasets for an API key.
 
@@ -372,7 +412,8 @@ the service account to the service instead of mounting credentials.
 
 ```
 app/
-  api.py             FastAPI app: /ask, /whoami, /health; limits, timeout, audit
+  api.py             FastAPI app: web app at /, /ask, /whoami, /health; limits, timeout, audit
+  static/            Web app (index.html, app.js, styles.css), no build step
   agent.py           Claude agent loop, structured answer, retry and turn limits
   mcp_server.py      MCP server exposing list_tables, get_schema, execute_query
   bigquery_tools.py  BigQuery calls behind the MCP tools; checks on every query
@@ -400,12 +441,13 @@ Dockerfile           Production image
 | 4. Claude analytics agent | ✅ Done, tested live |
 | 5. `/ask` endpoint and audit log | ✅ Done |
 | 6a. Rate limits, daily budget, timeouts, Docker, CI | ✅ Done |
+| 6a+. Web app for non-technical users | ✅ Done |
 | 6b. Secret Manager, Cloud Run deployment, Workload Identity Federation for CI | Planned |
 
 Each feature was built on its own branch, each based on the previous one:
 `docs/workflow-diagrams` → `feature/project-setup` → `feature/api-key-auth` →
 `feature/query-guardrails` → `feature/bigquery-mcp-server` → `feature/analytics-agent`
-→ `feature/ask-endpoint` → `feature/hardening`.
+→ `feature/ask-endpoint` → `feature/hardening` → `feature/web-ui`.
 
 ## Known limitations
 
