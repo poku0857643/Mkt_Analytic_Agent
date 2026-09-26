@@ -127,13 +127,14 @@ async function api(path, { method = "GET", body, signal, key = state.key } = {})
 
 // ---------- sign in ----------
 
-function showSignin(message) {
+function showSignin(message, clearKey = true) {
   $("app").hidden = true;
   $("signin").hidden = false;
   const err = $("signin-error");
   err.textContent = message || "";
   err.hidden = !message;
-  $("key-input").value = "";
+  // On first load, keep anything typed or pasted before the script ran.
+  if (clearKey) $("key-input").value = "";
   $("key-input").focus();
 }
 
@@ -728,7 +729,7 @@ function formatBytes(n) {
 
 (async function start() {
   const saved = readKey();
-  if (!saved) return showSignin();
+  if (!saved) return showSignin("", false);
   try {
     state.key = saved.key;
     state.user = await api("/whoami");
