@@ -11,3 +11,10 @@ Accept: application/json
 X-API-Key: your-api-key
 
 ###
+POST http://127.0.0.1:8000/ask
+Content-Type: application/json
+X-API-Key: your-api-key
+
+{"question": "Which channel drove the most revenue last quarter?"}
+
+###

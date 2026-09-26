@@ -135,91 +135,104 @@ class AnalyticsAgent:
         self.max_turns = max_turns
 
     async def ask(self, question: str, server: MCPServer, allowed_datasets: list[str]) -> AgentResult:
-        async with Client(server) as mcp:
-            listed = await mcp.list_tools()
-            # Sorted so the tools block is byte-identical across requests (prompt cache).
-            tools = [
-                {
-                    "name": t.name,
-                    "description": t.description or "",
-                    "input_schema": t.input_schema,
-                }
-                for t in sorted(listed.tools, key=lambda t: t.name)
-            ]
-            messages: list[dict] = [
-                {
-                    "role": "user",
-                    "content": (
-                        f"Available datasets: {', '.join(allowed_datasets)}\n\n"
-                        f"Question: {question}"
-                    ),
-                }
-            ]
-            result = AgentResult(answer=_limitation(""))
-            rejections = 0
+        try:
+            async with Client(server) as mcp:
+                return await self._run(mcp, question, allowed_datasets)
+        except BaseExceptionGroup as group:
+            # The MCP client's task group wraps errors raised inside it; surface the
+            # original so callers can tell an API outage from anything else.
+            leaf: BaseException = group
+            while isinstance(leaf, BaseExceptionGroup) and len(leaf.exceptions) == 1:
+                leaf = leaf.exceptions[0]
+            if leaf is group:
+                raise
+            raise leaf from None
 
-            while result.turns < self.max_turns:
-                result.turns += 1
-                response = await self.client.beta.messages.create(
-                    model=self.model,
-                    max_tokens=16000,
-                    system=SYSTEM_PROMPT,
-                    tools=tools,
-                    messages=messages,
-                    thinking={"type": "adaptive"},
-                    output_config={"effort": self.effort, "format": ANSWER_FORMAT},
-                    cache_control={"type": "ephemeral"},
-                    betas=[FALLBACK_BETA],
-                    fallbacks="default",
-                )
-                usage = response.usage
-                result.input_tokens += usage.input_tokens
-                result.cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
-                result.cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
-                result.output_tokens += usage.output_tokens
+    async def _run(self, mcp: Client, question: str, allowed_datasets: list[str]) -> AgentResult:
+        listed = await mcp.list_tools()
+        # Sorted so the tools block is byte-identical across requests (prompt cache).
+        tools = [
+            {
+                "name": t.name,
+                "description": t.description or "",
+                "input_schema": t.input_schema,
+            }
+            for t in sorted(listed.tools, key=lambda t: t.name)
+        ]
+        messages: list[dict] = [
+            {
+                "role": "user",
+                "content": (
+                    f"Available datasets: {', '.join(allowed_datasets)}\n\n"
+                    f"Question: {question}"
+                ),
+            }
+        ]
+        result = AgentResult(answer=_limitation(""))
+        rejections = 0
 
-                if response.stop_reason == "refusal":
-                    result.answer = _limitation(
-                        "This question could not be answered because the request was declined."
-                    )
-                    return result
-
-                if response.stop_reason == "end_turn":
-                    result.answer = self._parse_answer(response)
-                    return result
-
-                if response.stop_reason != "tool_use":
-                    result.answer = _limitation(
-                        f"The analysis stopped unexpectedly ({response.stop_reason})."
-                    )
-                    return result
-
-                # Keep the full content (thinking blocks included) for the next turn.
-                messages.append({"role": "assistant", "content": response.content})
-
-                tool_results = []
-                for block in response.content:
-                    if block.type != "tool_use":
-                        continue
-                    content, is_error, rejected = await self._run_tool(
-                        mcp, block, result, rejections
-                    )
-                    rejections += rejected
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": content,
-                            "is_error": is_error,
-                        }
-                    )
-                messages.append({"role": "user", "content": tool_results})
-
-            result.answer = _limitation(
-                f"The analysis did not finish within {self.max_turns} steps. "
-                "Try a narrower question."
+        while result.turns < self.max_turns:
+            result.turns += 1
+            response = await self.client.beta.messages.create(
+                model=self.model,
+                max_tokens=16000,
+                system=SYSTEM_PROMPT,
+                tools=tools,
+                messages=messages,
+                thinking={"type": "adaptive"},
+                output_config={"effort": self.effort, "format": ANSWER_FORMAT},
+                cache_control={"type": "ephemeral"},
+                betas=[FALLBACK_BETA],
+                fallbacks="default",
             )
-            return result
+            usage = response.usage
+            result.input_tokens += usage.input_tokens
+            result.cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
+            result.cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
+            result.output_tokens += usage.output_tokens
+
+            if response.stop_reason == "refusal":
+                result.answer = _limitation(
+                    "This question could not be answered because the request was declined."
+                )
+                return result
+
+            if response.stop_reason == "end_turn":
+                result.answer = self._parse_answer(response)
+                return result
+
+            if response.stop_reason != "tool_use":
+                result.answer = _limitation(
+                    f"The analysis stopped unexpectedly ({response.stop_reason})."
+                )
+                return result
+
+            # Keep the full content (thinking blocks included) for the next turn.
+            messages.append({"role": "assistant", "content": response.content})
+
+            tool_results = []
+            for block in response.content:
+                if block.type != "tool_use":
+                    continue
+                content, is_error, rejected = await self._run_tool(
+                    mcp, block, result, rejections
+                )
+                rejections += rejected
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": content,
+                        "is_error": is_error,
+                    }
+                )
+            messages.append({"role": "user", "content": tool_results})
+
+        result.answer = _limitation(
+            f"The analysis did not finish within {self.max_turns} steps. "
+            "Try a narrower question."
+        )
+        return result
 
     async def _run_tool(self, mcp: Client, block, result: AgentResult, rejections: int):
         """Run one tool call. Returns (content, is_error, rejected: 0 or 1)."""

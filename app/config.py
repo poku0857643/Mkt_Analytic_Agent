@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # Hard cap on model turns per question.
     agent_max_turns: int = 12
 
+    # Where /ask audit records go: a JSON-lines file, or "-" for stdout (Cloud Run).
+    audit_log_path: str = "logs/audit.jsonl"
+
 
 @lru_cache
 def get_settings() -> Settings:
