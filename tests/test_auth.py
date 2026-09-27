@@ -24,6 +24,7 @@ def test_valid_key_returns_user_and_datasets(client):
         "user": "ana",
         "role": "analyst",
         "allowed_datasets": ["marketing"],
+        "plan": "subscription",
     }
 
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.config import KeyOwner, Settings, get_settings
 from app.sessions import verify
+from app.usage import client_ip, plan_for, trial_refusal
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -25,6 +26,7 @@ class User(BaseModel):
     user: str
     role: str
     allowed_datasets: list[str]
+    plan: str = "subscription"
 
 
 def hash_key(api_key: str) -> str:
@@ -72,7 +74,7 @@ def _with_datasets(user: str, role: str, settings: Settings) -> User:
             status.HTTP_403_FORBIDDEN,
             f"Role '{role}' has no dataset access",
         )
-    return User(user=user, role=role, allowed_datasets=datasets)
+    return User(user=user, role=role, allowed_datasets=datasets, plan=plan_for(user, settings))
 
 
 def get_current_user(
@@ -105,8 +107,13 @@ def get_current_user(
     # Looked up on every request, so removing someone from USER_ROLES takes effect at once.
     role = role_for_email(email, session.get("hd"), settings.user_roles)
     if role is None:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            f"{email} does not have access yet. Ask an admin to add you.",
-        )
+        # Not enrolled: a free trial on the trial datasets, if this account and
+        # network may have one.
+        refusal = trial_refusal(email, client_ip(request, settings), settings)
+        if refusal:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"{email} does not have access yet. {refusal}",
+            )
+        return User(user=email, role="trial", allowed_datasets=list(settings.freemium_datasets), plan="freemium")
     return _with_datasets(email, role, settings)

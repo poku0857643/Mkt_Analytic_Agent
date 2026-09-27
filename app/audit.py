@@ -21,7 +21,7 @@ from fastapi import Depends
 from app.config import Settings, get_settings
 
 Outcome = Literal[
-    "answered", "limitation", "denied", "rate_limited", "over_budget", "error",
+    "answered", "limitation", "denied", "rate_limited", "over_budget", "plan_limit", "error",
     # Sign-in events: signed in with a role, or signed in and waiting for one.
     "signed_in", "access_requested",
 ]

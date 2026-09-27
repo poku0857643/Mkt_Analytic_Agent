@@ -22,7 +22,12 @@
         </svg>
         <span class="brand-name">Marketing Answers</span>
       </span>
+      <nav id="views" class="views" aria-label="Sections" hidden>
+        <button id="tab-ask" type="button" class="view-tab" aria-current="page">Ask</button>
+        <button id="tab-usage" type="button" class="view-tab">Usage</button>
+      </nav>
       <nav id="account" class="account" aria-label="Account" hidden>
+        <span id="who-plan" class="plan-pill"></span>
         <span id="who-avatar" class="avatar" aria-hidden="true"></span>
         <span id="who-name" class="who-name"></span>
         <button id="signout" type="button" class="btn btn-ghost btn-sm">Sign out</button>
@@ -92,6 +97,7 @@
       </span>
       <h1 class="signin-title">You don't have access yet</h1>
       <p class="signin-sub">You're signed in as <strong id="pending-email"></strong>, but this account hasn't been given access to any data.</p>
+      <p id="pending-reason" class="pending-reason" hidden></p>
       <div class="steps">
         <p class="steps-title">To get access</p>
         <ol>
@@ -110,6 +116,12 @@
   <!-- ================= App ================= -->
   <div id="app" class="shell" hidden>
     <main id="main" class="main" tabindex="-1">
+     <div id="ask-view">
+      <div id="trial-note" class="trial-note" hidden>
+        <span class="pill pill-info">Free trial</span>
+        <span id="trial-text"></span>
+        <button id="trial-usage" type="button" class="btn btn-ghost btn-xs">See usage</button>
+      </div>
       <form id="ask-form" class="ask" novalidate>
         <div id="question-group" class="field">
           <h1 class="page-title"><label for="question">What would you like to know?</label></h1>
@@ -145,6 +157,7 @@
           <h2 id="problem-title" class="alert-title"></h2>
           <p id="problem-text" class="alert-text"></p>
           <button id="problem-retry" type="button" class="btn btn-secondary btn-sm" hidden>Try again</button>
+          <button id="problem-usage" type="button" class="btn btn-secondary btn-sm" hidden>View your usage</button>
         </div>
       </div>
 
@@ -202,9 +215,53 @@
         <h2 id="start-title" class="section-title">Explore your data</h2>
         <div id="dataset-list" class="dataset-grid"></div>
       </section>
+     </div>
+
+     <section id="usage-view" class="usage" hidden aria-labelledby="usage-title" tabindex="-1">
+      <h1 id="usage-title" class="page-title">Usage</h1>
+      <p class="page-sub">Your plan and what you've used this month. Costs are estimates at list prices.</p>
+
+      <div class="card plan-card">
+        <div>
+          <p class="eyebrow">Your plan</p>
+          <h2 id="plan-name" class="plan-name"></h2>
+          <p id="plan-summary" class="muted"></p>
+        </div>
+        <p id="plan-period" class="muted small"></p>
+      </div>
+
+      <div id="limit-list" class="limit-list"></div>
+
+      <div class="stat-row">
+        <div class="card stat"><p class="stat-label">Questions this month</p><p id="stat-questions" class="stat-value"></p></div>
+        <div class="card stat"><p id="stat-money-label" class="stat-label"></p><p id="stat-money" class="stat-value"></p></div>
+        <div class="card stat"><p class="stat-label">Questions today</p><p id="stat-today" class="stat-value"></p></div>
+      </div>
+
+      <figure class="card usage-chart-card">
+        <figcaption id="usage-chart-title" class="chart-title"></figcaption>
+        <div id="usage-chart" class="chart"></div>
+        <details class="disclosure">
+          <summary>Show the numbers as a table</summary>
+          <div class="table-scroll"><table id="usage-daily-table" class="table"></table></div>
+        </details>
+      </figure>
+
+      <section class="card usage-section" aria-labelledby="recent-title">
+        <h2 id="recent-title" class="section-title">Question history</h2>
+        <div class="table-scroll"><table id="usage-recent-table" class="table"></table></div>
+        <p id="usage-recent-empty" class="muted small" hidden>No questions yet this month.</p>
+      </section>
+
+      <section id="usage-admin" class="card usage-section" hidden aria-labelledby="admin-title">
+        <h2 id="admin-title" class="section-title">Everyone this month</h2>
+        <p class="muted small">Visible to admins only.</p>
+        <div class="table-scroll"><table id="usage-admin-table" class="table"></table></div>
+      </section>
+     </section>
     </main>
 
-    <aside class="sidebar" aria-labelledby="history-title">
+    <aside id="sidebar" class="sidebar" aria-labelledby="history-title">
       <div class="card side-card">
         <div class="side-head">
           <h2 id="history-title" class="side-title">Recent questions</h2>

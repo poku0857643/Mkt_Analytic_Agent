@@ -65,6 +65,9 @@ const state = {
   mode: null, // "google" (session cookie) or "key" (X-API-Key)
   name: "", // display name from Google
   googleEnabled: false,
+  view: "ask",
+  usage: null, // last /usage report
+  usageChart: null,
 };
 
 // Why a Google sign-in came back without a session (?signin_error=...).
@@ -182,6 +185,7 @@ function setFieldError(group, messageEl, input, text) {
 function showScreen(name) {
   for (const id of ["signin", "pending", "app"]) $(id).hidden = id !== name;
   $("account").hidden = name !== "app";
+  $("views").hidden = name !== "app";
 }
 
 function showSignin({ alert = null, keyError = "", clearKey = true } = {}) {
@@ -210,9 +214,13 @@ function showSigninError(text) {
   if (text) $("key-input").focus();
 }
 
-function showPending(email) {
+function showPending(email, detail = "") {
   showScreen("pending");
   $("pending-email").textContent = email;
+  // The server explains why (e.g. trials closed for this network); drop the lead-in.
+  const reason = detail.includes("does not have access yet.") ? detail.split("does not have access yet.")[1].trim() : "";
+  $("pending-reason").textContent = reason;
+  $("pending-reason").hidden = !reason;
   $("pending-refresh").focus();
 }
 
@@ -238,6 +246,8 @@ async function endSession() {
   state.current = null;
   state.mode = null;
   state.name = "";
+  state.usage = null;
+  disposeUsageChart();
 }
 
 async function signOut(alert = null) {
@@ -293,6 +303,9 @@ function showApp() {
   renderDatasets();
   renderHistory();
   resetView();
+  $("who-plan").textContent = PLAN_LABELS[state.user.plan] || "";
+  refreshPlan();
+  showView(location.hash === "#usage" ? "usage" : "ask");
 
   const q = new URLSearchParams(location.search).get("q");
   if (q) $("question").value = q.slice(0, QUESTION_MAX);
@@ -512,6 +525,7 @@ async function ask(raw) {
     saveHistory([item, ...loadHistory().filter((i) => i.id !== item.id)]);
     showAnswer(item);
     renderHistory();
+    refreshPlan();
   } catch (err) {
     if (err.name === "AbortError") return;
     if (err instanceof ApiError && err.status === 401) {
@@ -520,8 +534,8 @@ async function ask(raw) {
         : { title: "Your access key no longer works", text: "It may have been changed or removed. Ask your admin for a new one." });
       return;
     }
-    const [title, text, retry] = askErrorText(err);
-    showProblem(title, text, retry);
+    const [title, text, retry, usage] = askErrorText(err);
+    showProblem(title, text, retry, usage);
   } finally {
     if (state.controller === controller) {
       state.controller = null;
@@ -552,13 +566,16 @@ function askErrorText(err) {
       return ["That question took too long", "Try a narrower question, for example one channel, one product or a shorter date range.", true];
     default:
       return ["Something went wrong", "Your question couldn't be answered. Try again, or rephrase it. If it keeps happening, tell your admin.", true];
+    case 402:
+      return ["You've reached your plan's limit", err.detail || "Your plan's allowance is used up for now.", false, true];
   }
 }
 
-function showProblem(title, text, retry = false) {
+function showProblem(title, text, retry = false, usage = false) {
   $("problem-title").textContent = title;
   $("problem-text").textContent = text;
   $("problem-retry").hidden = !retry;
+  $("problem-usage").hidden = !usage;
   $("problem").hidden = false;
   $("start").hidden = false;
   $("problem").focus();
@@ -794,13 +811,17 @@ function disposeChart() {
 let resizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => state.chart && state.chart.resize(), 100);
+  resizeTimer = setTimeout(() => {
+    if (state.chart) state.chart.resize();
+    if (state.usageChart) state.usageChart.resize();
+  }, 100);
 });
 // Canvas text uses whatever font is loaded at draw time; redraw once Inter is ready.
 if (document.fonts) document.fonts.ready.then(() => { if (state.chart) drawChart(); });
 // Redraw with the other palette when the system switches light/dark mode.
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if (state.chart) drawChart();
+  if (state.usageChart && state.usage) drawUsageChart(state.usage);
 });
 
 function chartPng(chart) {
@@ -943,6 +964,281 @@ function formatBytes(n, queries) {
   return `${i ? n.toFixed(1) : n} ${units[i]}`;
 }
 
+// ---------- plans and usage ----------
+
+const PLAN_LABELS = { subscription: "Subscription", payg: "Pay as you go", freemium: "Free trial" };
+
+function formatUSD(v) {
+  if (v > 0 && v < 0.01) return "<$0.01";
+  return new Intl.NumberFormat(LOCALE, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+}
+
+function formatDay(iso) {
+  return new Date(iso + (iso.length === 10 ? "T00:00:00Z" : "")).toLocaleDateString(LOCALE, { day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+function showView(name) {
+  state.view = name;
+  $("ask-view").hidden = name !== "ask";
+  $("usage-view").hidden = name !== "usage";
+  // Recent questions belong with asking; the usage page has its own history.
+  $("sidebar").hidden = name !== "ask";
+  $("app").classList.toggle("single", name !== "ask");
+  $("tab-ask").toggleAttribute("aria-current", name === "ask");
+  $("tab-usage").toggleAttribute("aria-current", name === "usage");
+  if (name === "ask") $("tab-ask").setAttribute("aria-current", "page");
+  else $("tab-usage").setAttribute("aria-current", "page");
+  history.replaceState(null, "", location.pathname + location.search + (name === "usage" ? "#usage" : ""));
+  if (name === "usage") {
+    loadUsagePage();
+  } else {
+    disposeUsageChart();
+    if (state.chart) state.chart.resize();
+  }
+}
+
+// Back/forward and #usage links switch sections too.
+window.addEventListener("hashchange", () => {
+  const view = location.hash === "#usage" ? "usage" : "ask";
+  if (!$("app").hidden && view !== state.view) showView(view);
+});
+
+$("tab-ask").addEventListener("click", () => showView("ask"));
+$("tab-usage").addEventListener("click", () => showView("usage"));
+$("trial-usage").addEventListener("click", () => showView("usage"));
+$("problem-usage").addEventListener("click", () => showView("usage"));
+
+// Keep the plan label and the trial allowance note current.
+async function refreshPlan() {
+  try {
+    state.usage = await api("/usage");
+  } catch {
+    return;
+  }
+  renderTrialNote(state.usage);
+}
+
+function renderTrialNote(report) {
+  const trial = report.plan.id === "freemium";
+  $("trial-note").hidden = !trial;
+  if (!trial) return;
+  const q = report.limits.find((l) => l.id === "trial_questions");
+  const parts = [];
+  if (q) {
+    const left = Math.max(0, q.limit - q.used);
+    parts.push(`${left} of ${q.limit} free question${q.limit === 1 ? "" : "s"} left today`);
+  }
+  if (report.trial_ends_on) parts.push(`trial ends ${formatDay(report.trial_ends_on)}`);
+  parts.push("sample data only");
+  $("trial-text").textContent = parts.join(" · ");
+}
+
+async function loadUsagePage() {
+  await refreshPlan();
+  const report = state.usage;
+  if (!report || state.view !== "usage") return;
+  renderUsage(report);
+  if (report.is_usage_admin) {
+    try {
+      renderAdminUsage(await api("/usage/all"));
+    } catch {}
+  }
+}
+
+function formatLimit(value, unit) {
+  return unit === "usd" ? formatUSD(value) : new Intl.NumberFormat(LOCALE).format(value);
+}
+
+function renderUsage(report) {
+  $("plan-name").textContent = report.plan.name;
+  $("plan-summary").textContent = report.plan.summary;
+  $("plan-period").textContent = report.plan.id === "freemium"
+    ? (report.trial_ends_on ? `Trial ends ${formatDay(report.trial_ends_on)}` : "")
+    : `This month renews ${formatDay(report.period.renews_on)}`;
+
+  const list = $("limit-list");
+  list.replaceChildren();
+  for (const item of report.limits) {
+    const pct = item.limit > 0 ? Math.min(100, (item.used / item.limit) * 100) : 100;
+    const full = item.used >= item.limit;
+    const card = document.createElement("div");
+    card.className = "card meter" + (full ? " is-full" : pct >= 80 ? " is-warning" : "");
+    const head = document.createElement("div");
+    head.className = "meter-head";
+    const label = document.createElement("span");
+    label.className = "meter-label";
+    label.textContent = item.label;
+    const value = document.createElement("span");
+    value.className = "meter-value";
+    value.textContent = `${formatLimit(item.used, item.unit)} of ${formatLimit(item.limit, item.unit)}`;
+    head.append(label, value);
+    const track = document.createElement("div");
+    track.className = "meter-track";
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-label", item.label);
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", "100");
+    track.setAttribute("aria-valuenow", String(Math.round(pct)));
+    const fill = document.createElement("div");
+    fill.className = "meter-fill";
+    fill.style.width = pct + "%";
+    track.append(fill);
+    const foot = document.createElement("div");
+    foot.className = "meter-foot";
+    const stateText = document.createElement("span");
+    stateText.className = "meter-state";
+    // Words as well as colour, so the state never depends on colour alone.
+    stateText.textContent = full ? "Used up" : pct >= 80 ? "Almost used"
+      : item.used > 0 && pct < 1 ? "Less than 1% used" : `${Math.round(pct)}% used`;
+    const resets = document.createElement("span");
+    resets.textContent = `Resets ${formatDay(item.resets_at.slice(0, 10))}`;
+    foot.append(stateText, resets);
+    card.append(head, track, foot);
+    list.append(card);
+  }
+
+  const payg = report.plan.id === "payg";
+  $("stat-questions").textContent = new Intl.NumberFormat(LOCALE).format(report.month.questions);
+  $("stat-money-label").textContent = payg ? "Charged this month" : report.plan.id === "freemium" ? "Free usage this month" : "Usage this month";
+  $("stat-money").textContent = formatUSD(payg ? report.month.charged_usd : report.month.cost_usd);
+  $("stat-today").textContent = new Intl.NumberFormat(LOCALE).format(report.today.questions);
+
+  $("usage-chart-title").textContent = payg ? "Charged per day this month" : "Questions per day this month";
+  drawUsageChart(report);
+  renderDailyTable(report);
+  renderRecent(report);
+}
+
+function usageMetric(report) {
+  const payg = report.plan.id === "payg";
+  return {
+    payg,
+    label: payg ? "Charged (USD)" : "Questions",
+    value: (d) => (payg ? d.charged_usd : d.questions),
+    format: (v) => (payg ? formatUSD(v) : new Intl.NumberFormat(LOCALE).format(v)),
+  };
+}
+
+function drawUsageChart(report) {
+  disposeUsageChart();
+  if (!window.echarts || state.view !== "usage") return;
+  const m = usageMetric(report);
+  const p = palette(false);
+  const font = { fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
+  const el = $("usage-chart");
+  el.style.height = "240px";
+  state.usageChart = window.echarts.init(el, null, { renderer: "canvas" });
+  state.usageChart.setOption({
+    animation: true,
+    backgroundColor: "transparent",
+    textStyle: font,
+    aria: { enabled: true },
+    grid: { left: 8, right: 16, top: 16, bottom: 8, containLabel: true },
+    tooltip: {
+      trigger: "item",
+      renderMode: "richText",
+      backgroundColor: p.surface,
+      borderColor: p.grid,
+      textStyle: { color: p.text, fontSize: 13, ...font },
+      formatter: (d) => `${formatDay(report.daily[d.dataIndex].day)}\n${m.label}: ${m.format(d.value)}`,
+    },
+    xAxis: {
+      type: "category",
+      data: report.daily.map((d) => String(Number(d.day.slice(8)))),
+      axisLabel: { color: p.muted, fontSize: 11, ...font, hideOverlap: true },
+      axisLine: { lineStyle: { color: p.grid } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      minInterval: m.payg ? undefined : 1,
+      axisLabel: { color: p.muted, fontSize: 11, ...font, formatter: (v) => (m.payg ? formatUSD(v) : formatCompact(v)) },
+      splitLine: { lineStyle: { color: p.grid, width: 1 } },
+    },
+    series: [{
+      type: "bar",
+      data: report.daily.map(m.value),
+      barMaxWidth: 16,
+      itemStyle: { color: p.series, borderRadius: [4, 4, 0, 0] },
+      emphasis: { itemStyle: { opacity: 0.85 } },
+    }],
+  });
+}
+
+function disposeUsageChart() {
+  if (state.usageChart) {
+    state.usageChart.dispose();
+    state.usageChart = null;
+  }
+}
+
+function fillTable(table, headers, rows, numeric = []) {
+  table.replaceChildren();
+  const head = table.createTHead().insertRow();
+  headers.forEach((h, i) => {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = h;
+    if (numeric.includes(i)) th.className = "num";
+    head.append(th);
+  });
+  const body = table.createTBody();
+  for (const row of rows) {
+    const tr = body.insertRow();
+    row.forEach((cell, i) => {
+      const td = tr.insertCell();
+      td.textContent = cell;
+      if (numeric.includes(i)) td.className = "num";
+      if (typeof cell === "string" && cell.length > 60) {
+        td.className = "question";
+        td.title = cell;
+      }
+    });
+  }
+}
+
+function renderDailyTable(report) {
+  const m = usageMetric(report);
+  fillTable(
+    $("usage-daily-table"),
+    ["Day", "Questions", m.payg ? "Charged" : "Usage"],
+    report.daily.filter((d) => d.questions).map((d) => [
+      formatDay(d.day), String(d.questions), formatUSD(m.payg ? d.charged_usd : d.cost_usd),
+    ]),
+    [1, 2],
+  );
+}
+
+const STATUS_LABELS = {
+  answered: "Answered", limitation: "Partial answer", error: "Failed",
+};
+
+function renderRecent(report) {
+  const payg = report.plan.id === "payg";
+  $("usage-recent-empty").hidden = report.recent.length > 0;
+  $("usage-recent-table").hidden = report.recent.length === 0;
+  fillTable(
+    $("usage-recent-table"),
+    ["When", "Question", "Result", payg ? "Charged" : "Usage"],
+    report.recent.map((r) => [
+      formatWhen(r.ts), r.question, STATUS_LABELS[r.status] || r.status, formatUSD(payg ? r.charged_usd : r.cost_usd),
+    ]),
+    [3],
+  );
+}
+
+function renderAdminUsage(all) {
+  $("usage-admin").hidden = false;
+  fillTable(
+    $("usage-admin-table"),
+    ["Person", "Plan", "Questions", "Usage", "Charged", "Last used"],
+    all.users.map((u) => [
+      u.user, PLAN_LABELS[u.plan] || u.plan, String(u.questions), formatUSD(u.cost_usd), formatUSD(u.charged_usd), formatWhen(u.last_used),
+    ]),
+    [2, 3, 4],
+  );
+}
+
 // ---------- start ----------
 
 async function start() {
@@ -985,7 +1281,7 @@ async function start() {
       state.user = await api("/whoami", { key: null });
       return showApp();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 403) return showPending(session.email);
+      if (err instanceof ApiError && err.status === 403) return showPending(session.email, err.detail);
       if (!(err instanceof ApiError)) {
         return showSignin({ alert: { title: "Couldn't reach the service", text: "Check your internet connection, then refresh the page." } });
       }

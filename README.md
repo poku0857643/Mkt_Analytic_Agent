@@ -19,6 +19,7 @@ POST /ask  {"question": "Which channel drove the most revenue, and what was ROAS
 - [Security model](#security-model)
 - [Quick start](#quick-start)
 - [Web app](#web-app)
+- [Plans and usage](#plans-and-usage)
 - [Using the API](#using-the-api)
 - [Configuration](#configuration)
 - [Testing](#testing)
@@ -234,6 +235,45 @@ on the canvas (`renderMode: "richText"`) rather than as HTML. Downloaded CSV cel
 that start with `=`, `+`, `-` or `@` are prefixed with `'` so spreadsheets don't run
 them as formulas.
 
+## Plans and usage
+
+Every question runs on the server's own Claude API key, so each one is metered:
+Claude tokens and BigQuery bytes are priced at list prices (`PRICE_*` settings) and
+stored with the person, plan, IP address and question in a SQLite database
+(`USAGE_DB_PATH`). Each person is on one of three plans:
+
+| Plan | Who | What they pay | Limit |
+|---|---|---|---|
+| **Subscription** (default for enrolled people) | `USER_ROLES` / `API_KEYS`, unless `USER_PLANS` says otherwise | `SUBSCRIPTION_FEE_USD` a month | `SUBSCRIPTION_MONTHLY_ALLOWANCE_USD` of usage (at cost) a month |
+| **Pay as you go** | `USER_PLANS` entry `"payg"` | Each question at cost × `PAYG_MARKUP` | `PAYG_MONTHLY_LIMIT_USD` a month (unset for none) |
+| **Free trial** | Anyone who signs in with Google but isn't enrolled, when `FREEMIUM_ENABLED=true` | Nothing | Per account per day: `FREEMIUM_DAILY_QUESTIONS` and `FREEMIUM_DAILY_COST_USD`. Per IP address per day, across all trial accounts: `FREEMIUM_IP_DAILY_QUESTIONS`. Ends `FREEMIUM_TRIAL_DAYS` after the first question. |
+
+```bash
+USER_PLANS={"ana@company.com": "payg", "@partner.com": "payg"}
+FREEMIUM_ENABLED=true
+FREEMIUM_DATASETS=["ga4"]          # trial users only see these, never company data
+FREEMIUM_BLOCKED_ACCOUNTS=["@tempmail.dev"]
+FREEMIUM_BLOCKED_IPS=["203.0.113.0/24"]
+TRUSTED_PROXY_HOPS=1               # on Cloud Run, so the real client IP is used
+```
+
+- **Restricting trials:** `FREEMIUM_ALLOWED_ACCOUNTS` / `FREEMIUM_BLOCKED_ACCOUNTS`
+  (emails or `@domain`) and `FREEMIUM_ALLOWED_IPS` / `FREEMIUM_BLOCKED_IPS` (CIDR).
+  A refused person sees *You don't have access yet* with the reason.
+- **Limits** are checked before a question runs. When one is used up, `/ask` returns
+  `402` with a plain explanation, and nothing reaches Claude. Each plan's limit counts
+  only usage made on that plan.
+- **Client IP:** by default the connecting address is used and `X-Forwarded-For` is
+  ignored, because clients can forge it. Behind a proxy, set `TRUSTED_PROXY_HOPS` to
+  the number of proxies that append to the header.
+- **Usage page** (*Usage* in the web app, `GET /usage`): the person's plan, limit
+  meters with reset dates, this month's questions and cost, a daily chart, and their
+  question history. Admins (`USAGE_ADMIN_ROLES`) also see everyone's usage this month
+  (`GET /usage/all`).
+
+Costs are estimates, not invoices, and no payment is taken: connect a billing
+provider (for example Stripe) to charge subscriptions and pay-as-you-go amounts.
+
 ## Using the API
 
 ### `POST /ask`
@@ -275,6 +315,7 @@ curl -X POST http://127.0.0.1:8000/ask \
 | 401 | Missing or unknown API key |
 | 403 | The key's role has no datasets |
 | 422 | Invalid request body |
+| 402 | A plan limit is used up (trial, included usage, or spending cap); `detail` explains |
 | 429 | Rate limit (see `Retry-After`) or daily scan budget reached |
 | 502 | The Anthropic API is unavailable |
 | 504 | The question took longer than `ASK_TIMEOUT_SECONDS` |
@@ -318,6 +359,8 @@ web app they're under *Sign in with an access key instead*.
 - `GET /`: the [web app](#web-app), no auth for the page itself.
 - `GET /health`: liveness check, no auth.
 - `GET /whoami`: shows the user, role and datasets for an API key or signed-in session.
+- `GET /usage`: the caller's plan, limits and usage this month; `GET /usage/all`:
+  everyone's, for admins.
 - `GET /auth/login`, `GET /auth/callback`, `GET /auth/session`, `POST /auth/logout`:
   Google sign-in (see above).
 
@@ -352,6 +395,23 @@ values must be valid JSON.
 | `OAUTH_REDIRECT_URI` | derived | Set when behind a proxy or custom domain; must match the OAuth client |
 | `SESSION_MAX_AGE_SECONDS` | `28800` (8 h) | How long a sign-in lasts |
 | `SESSION_COOKIE_SECURE` | `true` | Send cookies over HTTPS only. `false` only for local http. |
+| `USAGE_DB_PATH` | `data/usage.sqlite3` | Usage database (one row per question) |
+| `USER_PLANS` | `{}` | `{"person@company.com" or "@domain" or key user: "subscription" \| "payg" \| "freemium"}` |
+| `DEFAULT_PLAN` | `subscription` | Plan for enrolled people without a `USER_PLANS` entry |
+| `USAGE_ADMIN_ROLES` | `["admin"]` | Roles that see everyone's usage |
+| `PRICE_INPUT_PER_MTOK` / `PRICE_OUTPUT_PER_MTOK` | `5.00` / `25.00` | Claude list prices per million tokens (claude-opus-5) |
+| `PRICE_CACHE_READ_PER_MTOK` / `PRICE_CACHE_WRITE_PER_MTOK` | `0.50` / `6.25` | Prompt-cache read / write prices |
+| `PRICE_BIGQUERY_PER_TIB` | `6.25` | BigQuery on-demand price per TiB scanned |
+| `SUBSCRIPTION_FEE_USD` / `SUBSCRIPTION_MONTHLY_ALLOWANCE_USD` | `20.00` / `25.00` | Monthly fee shown to subscribers, and usage it includes |
+| `PAYG_MARKUP` / `PAYG_MONTHLY_LIMIT_USD` | `1.2` / `100.00` | Pay-as-you-go price multiplier, and monthly cap |
+| `FREEMIUM_ENABLED` | `false` | Give unenrolled Google users a free trial |
+| `FREEMIUM_DATASETS` | `["ga4"]` | Datasets trial users can query |
+| `FREEMIUM_DAILY_QUESTIONS` / `FREEMIUM_DAILY_COST_USD` | `5` / `0.50` | Per-account daily trial caps |
+| `FREEMIUM_IP_DAILY_QUESTIONS` | `15` | Daily trial questions per IP address, across accounts |
+| `FREEMIUM_TRIAL_DAYS` | `14` | Trial length from the first question (unset for no end) |
+| `FREEMIUM_ALLOWED_ACCOUNTS` / `FREEMIUM_BLOCKED_ACCOUNTS` | `[]` | Emails or `@domain` allowed (empty = any) / refused a trial |
+| `FREEMIUM_ALLOWED_IPS` / `FREEMIUM_BLOCKED_IPS` | `[]` | CIDR ranges allowed (empty = any) / refused a trial |
+| `TRUSTED_PROXY_HOPS` | `0` | Proxies that append to `X-Forwarded-For` (Cloud Run: `1`); `0` ignores the header |
 | `PII_COLUMNS` | `[]` | `["dataset.table.column", ...]` columns that can never be queried |
 | `ANTHROPIC_API_KEY` | – | Claude API key. Keep it only in `.env` or a secret manager. |
 | `AGENT_MODEL` | `claude-opus-5` | Claude model for the agent |
@@ -523,6 +583,7 @@ app/
   auth.py            Who is calling (API key or Google session) and their role
   google_auth.py     Sign in with Google: /auth/login, /auth/callback, /auth/logout
   sessions.py        HMAC-signed, expiring cookie tokens
+  usage.py           Plans, per-question metering (SQLite), limits, trial rules
   limits.py          Per-user rate limit and daily scan budget
   audit.py           JSON-lines audit log
   config.py          Settings from environment / .env
@@ -569,6 +630,13 @@ Each feature was built on its own branch, each based on the previous one:
   Google Groups aren't read; use a Workspace domain entry or list people. When
   deploying to Cloud Run, Identity-Aware Proxy can be added in front for defense in
   depth.
+- **Usage is per server instance's database.** SQLite suits one instance; with
+  several (e.g. Cloud Run scaling out), move the usage store to a shared database
+  (Cloud SQL, Firestore). Limits are checked before a question runs, so one question
+  in flight can take usage slightly past a cap. A question that fails mid-way is
+  metered for its BigQuery bytes but not the Claude tokens it used.
+- **No payments.** Plans, prices and usage are tracked, but nobody is charged; a
+  billing provider would need to be connected.
 - **Access requests aren't notified.** A person waiting for access shows up as an
   `access_requested` audit record; nobody is emailed.
 - **Answers are only as good as the data.** Numbers come from query results, but the

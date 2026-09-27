@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.api import app
 from app.auth import hash_key
 from app.config import KeyOwner, Settings, get_settings
+from app.usage import UsageStore, get_usage_store
 
 # Raw keys the tests send; test_auth.py uses the same values.
 ANALYST_KEY = "analyst-test-key"
@@ -30,7 +31,14 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def client(settings):
+def usage_store():
+    return UsageStore(":memory:")
+
+
+@pytest.fixture
+def client(settings, usage_store):
     app.dependency_overrides[get_settings] = lambda: settings
+    # In memory, so tests never write a usage database to disk.
+    app.dependency_overrides[get_usage_store] = lambda: usage_store
     yield TestClient(app)
     app.dependency_overrides.clear()

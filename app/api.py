@@ -22,6 +22,20 @@ from app.config import Settings, get_settings
 from app.google_auth import router as google_auth_router
 from app.limits import DailyScanBudget, RateLimiter
 from app.mcp_server import build_server
+from app.usage import (
+    PLAN_NAMES,
+    UsageRow,
+    UsageStore,
+    charge,
+    client_ip,
+    enforce,
+    get_usage_store,
+    limits,
+    next_month_start,
+    price,
+    trial_ends,
+    utc_now,
+)
 
 app = FastAPI(title="Marketing Analytics Agent")
 
@@ -148,6 +162,43 @@ def audited_user(
         raise
 
 
+def _meter(
+    usage: UsageStore,
+    settings: Settings,
+    user: User,
+    ip: str,
+    question: str,
+    record: AuditRecord,
+    result: AgentResult | None,
+) -> None:
+    """Record what the question cost. Failed questions still count what they used."""
+    # Token counts come from the agent result; a question that failed mid-way
+    # only has its BigQuery bytes (the agent's partial token use isn't returned).
+    tokens = dict(
+        input_tokens=result.input_tokens if result else 0,
+        cache_read_tokens=result.cache_read_tokens if result else 0,
+        cache_write_tokens=result.cache_write_tokens if result else 0,
+        output_tokens=result.output_tokens if result else 0,
+    )
+    cost = price(settings, bytes_processed=record.total_bytes_processed, **tokens)
+    usage.record(
+        UsageRow(
+            request_id=record.request_id,
+            user=user.user,
+            plan=user.plan,
+            ip=ip,
+            question=question,
+            status=record.outcome,
+            bytes_processed=record.total_bytes_processed,
+            llm_cost_usd=cost.llm_usd,
+            bigquery_cost_usd=cost.bigquery_usd,
+            cost_usd=cost.total_usd,
+            charged_usd=charge(user.plan, cost.total_usd, settings),
+            **tokens,
+        )
+    )
+
+
 def _audit_from_result(record: AuditRecord, result: AgentResult) -> None:
     record.queries = [
         AuditQuery(q.sql, q.approved, q.detail, q.bytes_processed) for q in result.queries
@@ -169,8 +220,11 @@ async def ask(
     audit: Annotated[AuditLog, Depends(get_audit_log)],
     limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     budget: Annotated[DailyScanBudget, Depends(get_scan_budget)],
+    usage: Annotated[UsageStore, Depends(get_usage_store)],
+    request: Request,
 ) -> AskResponse:
     started = time.monotonic()
+    ip = client_ip(request, settings)
     record = AuditRecord(
         request_id=str(uuid.uuid4()),
         outcome="error",
@@ -189,6 +243,13 @@ async def ask(
             "Too many questions. Please wait a moment.",
             headers={"Retry-After": str(math.ceil(retry_after))},
         )
+
+    try:
+        enforce(user.user, user.plan, ip, usage, settings)
+    except HTTPException:
+        record.outcome, record.http_status = "plan_limit", status.HTTP_402_PAYMENT_REQUIRED
+        audit.write(record)
+        raise
 
     remaining = budget.remaining(user.user)
     if remaining <= 0:
@@ -211,6 +272,7 @@ async def ask(
         timeout=settings.query_timeout_seconds,
     )
 
+    result: AgentResult | None = None
     try:
         async with asyncio.timeout(settings.ask_timeout_seconds):
             result = await agent.ask(body.question, build_server(tools), user.allowed_datasets)
@@ -241,6 +303,7 @@ async def ask(
         record.total_bytes_processed = tools.bytes_processed
         record.duration_ms = int((time.monotonic() - started) * 1000)
         audit.write(record)
+        _meter(usage, settings, user, ip, body.question, record, result)
 
     return AskResponse(
         request_id=record.request_id,
@@ -250,3 +313,75 @@ async def ask(
         sql_used=result.sql_used,
         bytes_processed=record.total_bytes_processed,
     )
+
+
+# Usage page
+
+
+def _plan_info(plan: str, settings: Settings) -> dict:
+    if plan == "subscription":
+        summary = (
+            f"${settings.subscription_fee_usd:,.2f} a month, including "
+            f"${settings.subscription_monthly_allowance_usd:,.2f} of usage."
+        )
+    elif plan == "payg":
+        cap = settings.payg_monthly_limit_usd
+        summary = f"Charged per question at cost \u00d7 {settings.payg_markup:g}" + (
+            f", up to ${cap:,.2f} a month." if cap is not None else "."
+        )
+    else:
+        summary = (
+            f"Free: up to {settings.freemium_daily_questions} questions a day"
+            + (f" for {settings.freemium_trial_days} days" if settings.freemium_trial_days else "")
+            + ", on sample data."
+        )
+    return {"id": plan, "name": PLAN_NAMES.get(plan, plan), "summary": summary}
+
+
+@app.get("/usage")
+async def usage_report(
+    request: Request,
+    user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageStore, Depends(get_usage_store)],
+):
+    """The caller's plan, limits, and usage this month."""
+    now = utc_now()
+    month = now.strftime("%Y-%m")
+    by_day = usage.daily(user.user, month)
+    days = [
+        {"day": d, **by_day.get(d, {"questions": 0, "cost_usd": 0.0, "charged_usd": 0.0})}
+        for d in (f"{month}-{n:02d}" for n in range(1, now.day + 1))
+    ]
+    today = usage.day_totals(user.user, now.date().isoformat())
+    ends = trial_ends(user.user, usage, settings) if user.plan == "freemium" else None
+    return {
+        "user": user.user,
+        "plan": _plan_info(user.plan, settings),
+        "period": {"month": month, "renews_on": next_month_start(now).date().isoformat()},
+        "today": {"questions": today[0], "cost_usd": round(today[1], 4)},
+        "month": {k: round(v, 4) if isinstance(v, float) else v for k, v in usage.month_totals(user.user, month).items()},
+        # Per-network trial counts include other people, so they aren't shown.
+        "limits": [
+            {**item, "used": round(item["used"], 4)}
+            for item in limits(user.user, user.plan, client_ip(request, settings), usage, settings, now)
+            if not item.get("private")
+        ],
+        "trial_ends_on": ends.date().isoformat() if ends else None,
+        "daily": days,
+        "recent": usage.recent(user.user),
+        "is_usage_admin": user.role in settings.usage_admin_roles,
+    }
+
+
+@app.get("/usage/all")
+async def usage_all_users(
+    user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageStore, Depends(get_usage_store)],
+):
+    """Everyone's usage this month, for admins."""
+    if user.role not in settings.usage_admin_roles:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admins can see everyone's usage")
+    month = utc_now().strftime("%Y-%m")
+    return {"month": month, "users": usage.all_users(month)}

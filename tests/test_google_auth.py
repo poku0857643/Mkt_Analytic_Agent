@@ -15,6 +15,7 @@ from app.api import app, get_audit_log
 from app.auth import SESSION_COOKIE, SESSION_PURPOSE
 from app.config import Settings, get_settings
 from app.sessions import sign, verify
+from app.usage import UsageStore, get_usage_store
 
 SECRET = "test-session-secret-0123456789abcdef"
 CLIENT_ID = "test-client.apps.googleusercontent.com"
@@ -57,6 +58,7 @@ def audit():
 def client(settings, audit):
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_audit_log] = lambda: audit
+    app.dependency_overrides[get_usage_store] = lambda: UsageStore(":memory:")
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -194,6 +196,7 @@ def test_successful_sign_in(client, google, audit):
         "user": "ana@example.com",
         "role": "analyst",
         "allowed_datasets": ["marketing"],
+        "plan": "subscription",
     }
     assert client.get("/auth/session").json()["email"] == "ana@example.com"
     [record] = audit.records
