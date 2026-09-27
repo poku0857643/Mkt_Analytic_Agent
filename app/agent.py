@@ -26,6 +26,9 @@ by querying their BigQuery data with the tools provided.
 
 How to work:
 - Start with list_tables and get_schema so your SQL uses real table and column names.
+- Read the table and column descriptions: they define the metrics (for example how to \
+compute conversion rate) and note caveats such as placeholder values or missing data. \
+Follow those definitions.
 - Always qualify tables as dataset.table. Only the datasets named in the user's \
 message are available.
 - Columns marked restricted_pii cannot be queried, and SELECT * is refused on tables \

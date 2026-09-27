@@ -74,3 +74,17 @@ def test_pii_request_is_refused_without_leaking(data):
     emails = {c["email"] for c in data["customers.customers"]}
     assert not any(e in result.answer.summary for e in emails)
     assert not any("email" in sql.lower() for sql in result.sql_used)
+
+
+def test_ga4_top_revenue_channel():
+    # Referral leads revenue in the public GA4 sample (see scripts/build_ga4.sql).
+    result = ask("Which marketing channel brought in the most revenue?", datasets=("ga4",))
+    assert result.answer.status == "answered"
+    assert "referral" in result.answer.summary.lower()
+    assert result.sql_used
+
+
+def test_ga4_roas_explains_missing_cost_data():
+    result = ask("What was our return on ad spend by channel?", datasets=("ga4",))
+    assert result.answer.status == "limitation"
+    assert any(w in result.answer.summary.lower() for w in ("cost", "spend"))
