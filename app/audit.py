@@ -1,20 +1,30 @@
-"""Audit log: one JSON record per /ask request, including denied and failed ones.
+"""Audit log: one JSON record per /ask request (including denied and failed ones)
+and per Google sign-in attempt.
 
 Records go to a JSON-lines file, or to stdout when the path is "-". On Cloud Run,
 stdout JSON lands in Cloud Logging, which can be routed to BigQuery with a log
 sink, so the app itself never needs write access to BigQuery.
 
-Never recorded: API keys (only a short hash prefix) and answer text.
+Never recorded: API keys (only a short hash prefix), tokens, cookies and answer text.
 """
 import json
 import sys
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Annotated, Literal, Protocol
 
-Outcome = Literal["answered", "limitation", "denied", "rate_limited", "over_budget", "error"]
+from fastapi import Depends
+
+from app.config import Settings, get_settings
+
+Outcome = Literal[
+    "answered", "limitation", "denied", "rate_limited", "over_budget", "error",
+    # Sign-in events: signed in with a role, or signed in and waiting for one.
+    "signed_in", "access_requested",
+]
 
 
 @dataclass
@@ -30,6 +40,7 @@ class AuditRecord:
     request_id: str
     outcome: Outcome
     http_status: int
+    event: Literal["ask", "sign_in"] = "ask"
     user: str | None = None
     role: str | None = None
     # First 8 hex chars of sha256(key) for denied requests, to spot misuse.
@@ -68,3 +79,12 @@ class JsonLinesAuditLog:
             else:
                 with open(self.path, "a", encoding="utf-8") as f:
                     f.write(line + "\n")
+
+
+@lru_cache
+def _audit_log(path: str) -> JsonLinesAuditLog:
+    return JsonLinesAuditLog(path)
+
+
+def get_audit_log(settings: Annotated[Settings, Depends(get_settings)]) -> AuditLog:
+    return _audit_log(settings.audit_log_path)

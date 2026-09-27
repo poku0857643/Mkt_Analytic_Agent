@@ -21,6 +21,27 @@ class Settings(BaseSettings):
     # role -> datasets that role may query.
     role_datasets: dict[str, list[str]] = {}
 
+    # Google sign-in for people (API keys remain for scripts and integrations).
+    # Enabled when the client ID, client secret and session secret are all set.
+    google_client_id: str | None = None
+    google_client_secret: SecretStr | None = None
+    # Signs session cookies; any long random string (python -c "import secrets; print(secrets.token_urlsafe(48))").
+    session_secret: SecretStr | None = None
+    # Who may use the app after signing in with Google, and with which role:
+    # an exact address ("ana@company.com") or a whole Google Workspace domain
+    # ("@company.com", matched on Google's verified hosted-domain claim).
+    user_roles: dict[str, str] = {}
+    # Must match an authorized redirect URI on the OAuth client. Leave unset to
+    # derive it from the request (<scheme>://<host>/auth/callback).
+    oauth_redirect_uri: str | None = None
+    session_max_age_seconds: int = 8 * 3600
+    # Send cookies over HTTPS only. Set false only for local http development.
+    session_cookie_secure: bool = True
+
+    @property
+    def google_enabled(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret and self.session_secret)
+
     # Fully qualified "dataset.table.column" names that must never be queried.
     pii_columns: list[str] = []
 

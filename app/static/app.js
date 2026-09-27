@@ -62,6 +62,17 @@ const state = {
   current: null, // {id, question, response, at}
   lastQuestion: "",
   chart: null, // live ECharts instance
+  mode: null, // "google" (session cookie) or "key" (X-API-Key)
+  name: "", // display name from Google
+  googleEnabled: false,
+};
+
+// Why a Google sign-in came back without a session (?signin_error=...).
+const SIGNIN_ERRORS = {
+  cancelled: { title: "Sign-in was cancelled", text: "No problem. Continue with Google again whenever you're ready.", tone: "info" },
+  expired: { title: "Sign-in timed out", text: "The sign-in took too long or was interrupted. Please try again." },
+  unverified: { title: "Email address not verified", text: "Google says this account's email address isn't verified. Verify it with Google, or use your work account." },
+  failed: { title: "Sign-in didn't finish", text: "Something went wrong talking to Google. Please try again." },
 };
 
 // Match the page language rather than the browser's, so text and numbers read consistently.
@@ -134,7 +145,9 @@ class ApiError extends Error {
 }
 
 async function api(path, { method = "GET", body, signal, key = state.key } = {}) {
-  const headers = { "X-API-Key": key };
+  // The server requires this header on cookie-authenticated writes (CSRF defence).
+  const headers = { "X-Requested-With": "fetch" };
+  if (key) headers["X-API-Key"] = key;
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const res = await fetch(path, {
     method,
@@ -166,39 +179,70 @@ function setFieldError(group, messageEl, input, text) {
 
 // ---------- sign in ----------
 
-function showSignin(message, clearKey = true) {
-  $("app").hidden = true;
-  $("account").hidden = true;
-  $("signin").hidden = false;
+function showScreen(name) {
+  for (const id of ["signin", "pending", "app"]) $(id).hidden = id !== name;
+  $("account").hidden = name !== "app";
+}
+
+function showSignin({ alert = null, keyError = "", clearKey = true } = {}) {
+  showScreen("signin");
+  $("google-signin").hidden = !state.googleEnabled;
+  // Without Google sign-in configured (e.g. local development) the key form is the only way in.
+  $("key-option").classList.toggle("only", !state.googleEnabled);
+  if (!state.googleEnabled || keyError) $("key-option").open = true;
+
+  $("signin-alert").hidden = !alert;
+  $("signin-alert").className = "alert " + (alert && alert.tone === "info" ? "alert-info" : "alert-error");
+  $("signin-alert-title").textContent = alert ? alert.title : "";
+  $("signin-alert-text").textContent = alert ? alert.text : "";
+
   // On first load, keep anything typed or pasted before the script ran.
   if (clearKey) $("key-input").value = "";
-  showSigninError(message || "");
-  $("key-input").focus();
+  setFieldError("key-group", "key-error", $("key-input"), keyError);
+  (state.googleEnabled && !keyError ? $("google-btn") : $("key-input")).focus();
 }
 
 // One field, so the error sits under it (role="alert" announces it) and focus
 // returns to the field; a separate error summary would only repeat it.
 function showSigninError(text) {
+  $("key-option").open = true;
   setFieldError("key-group", "key-error", $("key-input"), text);
   if (text) $("key-input").focus();
+}
+
+function showPending(email) {
+  showScreen("pending");
+  $("pending-email").textContent = email;
+  $("pending-refresh").focus();
 }
 
 async function signIn(key, persist) {
   const user = await api("/whoami", { key });
   state.key = key;
   state.user = user;
+  state.mode = "key";
+  state.name = "";
   saveKey(key, persist);
   showApp();
 }
 
-function signOut(message) {
+async function endSession() {
   cancelAsk();
   forgetKey();
   disposeChart();
+  if (state.mode === "google" || !$("pending").hidden) {
+    try { await api("/auth/logout", { method: "POST", key: null }); } catch {}
+  }
   state.key = null;
   state.user = null;
   state.current = null;
-  showSignin(message);
+  state.mode = null;
+  state.name = "";
+}
+
+async function signOut(alert = null) {
+  await endSession();
+  showSignin({ alert });
 }
 
 function signinErrorText(err) {
@@ -231,16 +275,21 @@ $("signin-form").addEventListener("submit", async (e) => {
 });
 
 $("signout").addEventListener("click", () => signOut());
+$("pending-signout").addEventListener("click", () => signOut());
+$("pending-refresh").addEventListener("click", () => start());
+$("pending-switch").addEventListener("click", async () => {
+  await endSession();
+  location.assign("/auth/login");
+});
 
 // ---------- app shell ----------
 
 function showApp() {
   if (/Mac|iPhone|iPad/.test(navigator.platform)) $("mod-key").textContent = "⌘";
-  $("signin").hidden = true;
-  $("app").hidden = false;
-  $("account").hidden = false;
-  $("who-name").textContent = state.user.user;
-  $("who-avatar").textContent = initials(state.user.user);
+  showScreen("app");
+  $("who-name").textContent = state.name || state.user.user;
+  $("who-name").title = state.user.user;
+  $("who-avatar").textContent = initials(state.name || state.user.user);
   renderDatasets();
   renderHistory();
   resetView();
@@ -466,7 +515,9 @@ async function ask(raw) {
   } catch (err) {
     if (err.name === "AbortError") return;
     if (err instanceof ApiError && err.status === 401) {
-      signOut("Your access key is no longer valid. Sign in again");
+      signOut(state.mode === "google"
+        ? { title: "Your session has ended", text: "For security, sessions end after a few hours. Sign in again to continue.", tone: "info" }
+        : { title: "Your access key no longer works", text: "It may have been changed or removed. Ask your admin for a new one." });
       return;
     }
     const [title, text, retry] = askErrorText(err);
@@ -894,20 +945,57 @@ function formatBytes(n, queries) {
 
 // ---------- start ----------
 
-(async function start() {
-  const saved = readKey();
-  if (!saved) return showSignin("", false);
+async function start() {
+  const params = new URLSearchParams(location.search);
+  const signinError = params.get("signin_error");
+  if (signinError) {
+    // Show it once; don't keep it in the address bar or in shared links.
+    params.delete("signin_error");
+    history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : ""));
+  }
+
+  let session = { google_enabled: false, signed_in: false };
   try {
-    state.key = saved.key;
-    state.user = await api("/whoami");
-    showApp();
-  } catch (err) {
-    if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-      signOut(signinErrorText(err));
-    } else {
+    session = await api("/auth/session", { key: null });
+  } catch {}
+  state.googleEnabled = Boolean(session.google_enabled);
+
+  const saved = readKey();
+  if (saved) {
+    try {
+      state.key = saved.key;
+      state.mode = "key";
+      state.user = await api("/whoami");
+      return showApp();
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        await endSession();
+        return showSignin({ keyError: signinErrorText(err) });
+      }
       // Keep the saved key; the service may just be down for a moment.
       state.key = null;
-      showSignin(signinErrorText(err));
+      return showSignin({ alert: { title: "Couldn't reach the service", text: "Check your internet connection, then refresh the page." } });
     }
   }
-})();
+
+  if (session.signed_in) {
+    state.mode = "google";
+    state.name = session.name || "";
+    try {
+      state.user = await api("/whoami", { key: null });
+      return showApp();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) return showPending(session.email);
+      if (!(err instanceof ApiError)) {
+        return showSignin({ alert: { title: "Couldn't reach the service", text: "Check your internet connection, then refresh the page." } });
+      }
+    }
+  }
+
+  showSignin({
+    clearKey: false,
+    alert: signinError ? SIGNIN_ERRORS[signinError] || SIGNIN_ERRORS.failed : null,
+  });
+}
+
+start();

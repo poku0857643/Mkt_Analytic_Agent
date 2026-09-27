@@ -15,10 +15,11 @@ from google.cloud import bigquery
 from pydantic import BaseModel, Field
 
 from app.agent import AgentResult, AnalyticsAgent, Chart, build_agent
-from app.audit import AuditLog, AuditQuery, AuditRecord, JsonLinesAuditLog
+from app.audit import AuditLog, AuditQuery, AuditRecord, get_audit_log
 from app.auth import User, api_key_header, get_current_user, hash_key
 from app.bigquery_tools import BigQueryTools
 from app.config import Settings, get_settings
+from app.google_auth import router as google_auth_router
 from app.limits import DailyScanBudget, RateLimiter
 from app.mcp_server import build_server
 
@@ -73,15 +74,6 @@ def get_agent(settings: Annotated[Settings, Depends(get_settings)]) -> Analytics
 
 
 @lru_cache
-def _audit_log(path: str) -> JsonLinesAuditLog:
-    return JsonLinesAuditLog(path)
-
-
-def get_audit_log(settings: Annotated[Settings, Depends(get_settings)]) -> AuditLog:
-    return _audit_log(settings.audit_log_path)
-
-
-@lru_cache
 def _rate_limiter(limit: int) -> RateLimiter:
     return RateLimiter(limit, window=60.0)
 
@@ -100,6 +92,8 @@ def get_scan_budget(settings: Annotated[Settings, Depends(get_settings)]) -> Dai
 
 
 # Routes
+
+app.include_router(google_auth_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -133,13 +127,14 @@ class AskResponse(BaseModel):
 
 
 def audited_user(
+    request: Request,
     api_key: Annotated[str | None, Security(api_key_header)],
     settings: Annotated[Settings, Depends(get_settings)],
     audit: Annotated[AuditLog, Depends(get_audit_log)],
 ) -> User:
     """get_current_user, but denied attempts are written to the audit log."""
     try:
-        return get_current_user(api_key, settings)
+        return get_current_user(request, api_key, settings)
     except HTTPException as e:
         audit.write(
             AuditRecord(

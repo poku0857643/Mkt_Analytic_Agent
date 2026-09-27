@@ -30,7 +30,8 @@ POST /ask  {"question": "Which channel drove the most revenue, and what was ROAS
 
 ## How it works
 
-1. A team member sends a question to `POST /ask` with their API key.
+1. A team member signs in with Google in the [web app](#web-app) (or a script sends an
+   API key) and sends a question to `POST /ask`.
 2. The API checks the key, the per-user rate limit and the daily scan budget. The
    user's **role** decides which BigQuery datasets are available.
 3. The API builds an MCP server for that request, limited to those datasets, and
@@ -128,7 +129,8 @@ is enforced in code and covered by tests.
 
 | Layer | What it enforces | Where |
 |---|---|---|
-| **API keys** | Keys are stored only as SHA-256 digests and compared in constant time. Missing or unknown key → 401. | `app/auth.py` |
+| **Sign-in** | People sign in with Google (OpenID Connect code flow with PKCE, state and nonce; ID token signature, issuer, audience and expiry verified; verified email required). Access comes from `USER_ROLES`, checked on every request. The session is an HMAC-signed, HttpOnly, Secure, SameSite=Lax cookie that expires after 8 hours; cookie-authenticated writes also need an `X-Requested-With` header (CSRF). | `app/google_auth.py`, `app/auth.py`, `app/sessions.py` |
+| **API keys** | For scripts and integrations. Stored only as SHA-256 digests and compared in constant time. Missing or unknown key → 401. | `app/auth.py` |
 | **Roles** | Each role maps to a list of datasets. A role with none → 403. The dataset list is fixed when the MCP server is built and can't be changed through the request or tool arguments. | `app/auth.py`, `app/api.py` |
 | **Query checks** | Exactly one `SELECT` (CTEs and `UNION` allowed); no DDL, DML or scripting; every table qualified and inside an allowed dataset in this project; no table functions such as `EXTERNAL_QUERY`; unparseable SQL rejected. | `app/guardrails.py` |
 | **PII** | Listed columns are blocked, including through CTEs, `SELECT *`, `t.*`, and selecting a whole row by table alias. `COUNT(*)` is allowed. Schemas flag PII columns so the agent avoids them. | `app/guardrails.py`, `app/bigquery_tools.py` |
@@ -136,7 +138,7 @@ is enforced in code and covered by tests.
 | **Least privilege** | The service account can read the allowed datasets and run jobs, nothing else. Even a query that got past the checks couldn't write. | [Google Cloud setup](#google-cloud-setup) |
 | **Agent limits** | 3 rejected queries per question, then the agent must explain; 12 turns max; 180 s timeout; 10 questions per user per minute. | `app/agent.py`, `app/api.py` |
 | **Prompt injection** | The system prompt tells Claude that tool results are data, not instructions. The checks above hold even if the model is manipulated. | `app/agent.py` |
-| **Audit** | Every `/ask` request is logged, including denied and failed ones: user, role, question, each SQL attempt and its outcome, bytes, tokens, duration. Never logged: API keys (denied requests keep an 8-character hash prefix) and answer text. | `app/audit.py` |
+| **Audit** | Every `/ask` request is logged, including denied and failed ones: user, role, question, each SQL attempt and its outcome, bytes, tokens, duration. Every Google sign-in is logged too (`signed_in`, `access_requested`, or `denied` with the reason). Never logged: API keys (denied requests keep an 8-character hash prefix), tokens, cookies and answer text. | `app/audit.py` |
 
 ## Quick start
 
@@ -180,10 +182,14 @@ analytics) and/or [seed the sandbox datasets](#sandbox-data).
 ## Web app
 
 For people who don't use the command line, the API serves a browser app at `/`. Give
-each person the site's address and their API key; nothing needs installing.
+people the site's address; nothing needs installing, and nobody handles a key or
+password for this app.
 
-1. **Sign in** by pasting the key. Ticking *Keep me signed in* keeps it in this
-   browser; otherwise it's forgotten when the tab closes.
+1. **Sign in** with *Continue with Google*, using their work Google account. The app
+   receives only their name and verified email address. Anyone can sign in; people
+   not yet listed in `USER_ROLES` see a *You don't have access yet* page (and an
+   `access_requested` audit record tells the admin who is waiting). Once added, they
+   click *I've been added, check again*. Sessions last 8 hours.
 2. **Ask** in plain English, or click an example. Under *What you can ask about*, each
    dataset the person's role can use is described in plain words with example
    questions.
@@ -274,11 +280,46 @@ curl -X POST http://127.0.0.1:8000/ask \
 | 504 | The question took longer than `ASK_TIMEOUT_SECONDS` |
 | 500 | Anything else (details only in the audit log) |
 
+### Signing in with Google
+
+1. In the Google Cloud console for your project, open **Google Auth Platform**:
+   - **Branding**: app name and support email.
+   - **Audience**: *Internal* if your organization uses Google Workspace (only your
+     organization's accounts can sign in); otherwise *External*, and while the app is
+     in *Testing*, add each person under **Test users**.
+   - **Clients → Create client → Web application**. Add the authorized redirect
+     URI: `https://<your-domain>/auth/callback` (locally,
+     `http://localhost:8000/auth/callback`).
+2. Put the client ID and secret in `.env`, with a session secret and the people who
+   may use the app:
+
+   ```bash
+   GOOGLE_CLIENT_ID=1234-abc.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=...
+   SESSION_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
+   USER_ROLES={"ana@company.com": "analyst", "@company.com": "analyst", "boss@company.com": "admin"}
+   ```
+
+   `"@company.com"` gives everyone in that Google Workspace domain a role. It matches
+   Google's verified hosted-domain claim, not just the end of the address. An exact
+   address takes precedence over its domain.
+3. Local development over plain http: set `SESSION_COOKIE_SECURE=false` and browse to
+   `http://localhost:8000` (it must match the redirect URI).
+
+The web app loads nothing from Google: *Continue with Google* is a link to
+`/auth/login`, which redirects to Google and back to `/auth/callback`. Without the
+three Google settings, the sign-in page shows the access-key form instead.
+
+API keys still work everywhere (`X-API-Key`) for scripts and integrations; in the
+web app they're under *Sign in with an access key instead*.
+
 ### Other endpoints
 
 - `GET /`: the [web app](#web-app), no auth for the page itself.
 - `GET /health`: liveness check, no auth.
-- `GET /whoami`: shows the user, role and datasets for an API key.
+- `GET /whoami`: shows the user, role and datasets for an API key or signed-in session.
+- `GET /auth/login`, `GET /auth/callback`, `GET /auth/session`, `POST /auth/logout`:
+  Google sign-in (see above).
 
 ### Command line
 
@@ -304,6 +345,13 @@ values must be valid JSON.
 | `GCP_PROJECT` | `my-gcp-project` | Project that holds the datasets. Queries outside it are rejected. |
 | `API_KEYS` | `{}` | `{"<sha256 of key>": {"user": ..., "role": ...}}`. Generate with `scripts/hash_key.py`. |
 | `ROLE_DATASETS` | `{}` | `{"<role>": ["dataset", ...]}` |
+| `GOOGLE_CLIENT_ID` | – | OAuth client ID for Google sign-in |
+| `GOOGLE_CLIENT_SECRET` | – | OAuth client secret. Keep it only in `.env` or a secret manager. |
+| `SESSION_SECRET` | – | Signs session cookies. A long random string; changing it signs everyone out. |
+| `USER_ROLES` | `{}` | `{"person@company.com": "<role>", "@company.com": "<role>"}`: who may use the app after Google sign-in |
+| `OAUTH_REDIRECT_URI` | derived | Set when behind a proxy or custom domain; must match the OAuth client |
+| `SESSION_MAX_AGE_SECONDS` | `28800` (8 h) | How long a sign-in lasts |
+| `SESSION_COOKIE_SECURE` | `true` | Send cookies over HTTPS only. `false` only for local http. |
 | `PII_COLUMNS` | `[]` | `["dataset.table.column", ...]` columns that can never be queried |
 | `ANTHROPIC_API_KEY` | – | Claude API key. Keep it only in `.env` or a secret manager. |
 | `AGENT_MODEL` | `claude-opus-5` | Claude model for the agent |
@@ -472,7 +520,9 @@ app/
   mcp_server.py      MCP server exposing list_tables, get_schema, execute_query
   bigquery_tools.py  BigQuery calls behind the MCP tools; checks on every query
   guardrails.py      SQL checks: read-only, dataset allowlist, PII, cost
-  auth.py            API-key auth and roles
+  auth.py            Who is calling (API key or Google session) and their role
+  google_auth.py     Sign in with Google: /auth/login, /auth/callback, /auth/logout
+  sessions.py        HMAC-signed, expiring cookie tokens
   limits.py          Per-user rate limit and daily scan budget
   audit.py           JSON-lines audit log
   config.py          Settings from environment / .env
@@ -515,8 +565,12 @@ Each feature was built on its own branch, each based on the previous one:
   with the same name as a PII column is also blocked when both tables are in the query.
 - **Latency and cost.** A question takes about 15–30 s and roughly 3–5¢ with
   `claude-opus-5` at effort `high`. Lower `AGENT_EFFORT` for faster, cheaper answers.
-- **API keys are managed by hand** in `API_KEYS`. Single sign-on (for example
-  Identity-Aware Proxy in front of Cloud Run) is a later option.
+- **Access lists are managed by hand** in `USER_ROLES` (and `API_KEYS` for scripts).
+  Google Groups aren't read; use a Workspace domain entry or list people. When
+  deploying to Cloud Run, Identity-Aware Proxy can be added in front for defense in
+  depth.
+- **Access requests aren't notified.** A person waiting for access shows up as an
+  `access_requested` audit record; nobody is emailed.
 - **Answers are only as good as the data.** Numbers come from query results, but the
   agent can still pick a reasonable-looking query that doesn't match what you meant.
   Check `sql_used` for important decisions.

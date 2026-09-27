@@ -292,6 +292,9 @@ code, kbd, pre { font-family: var(--mono); font-size: 0.85em; }
 .alert-link { color: var(--error); font-size: 0.875rem; }
 .alert .btn { margin-top: 12px; }
 .alert-block { margin: 24px 0 0; }
+.alert-info { border-color: var(--hairline); background: var(--surface-sunken); }
+.alert-info .alert-icon { stroke: var(--muted); }
+.alert-info .alert-title { color: var(--text); }
 
 /* ---------- sign in ---------- */
 .signin {
@@ -315,6 +318,53 @@ code, kbd, pre { font-family: var(--mono); font-size: 0.85em; }
 @media (max-width: 480px) { .signin-card { padding: 28px 20px 20px; } }
 .signin-title { font-size: 1.5rem; font-weight: 650; margin-bottom: 8px; }
 .signin-sub { color: var(--text-secondary); font-size: 0.9375rem; margin-bottom: 28px; }
+
+/* Google button: neutral surface with the four-colour mark, per Google's sign-in branding. */
+.btn-google {
+  gap: 12px;
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs);
+  text-decoration: none;
+  font-size: 0.9375rem;
+}
+.btn-google:hover { background: var(--surface-sunken); }
+.google-logo { width: 18px; height: 18px; flex: none; }
+.signin-note { font-size: 0.8125rem; color: var(--muted); margin-top: 12px; text-align: center; }
+.signin-note + .signin-note { margin-top: 6px; }
+.key-option { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--hairline); }
+.key-option > .field-hint { margin: 10px 0 16px; }
+/* When Google sign-in isn't configured, the key form is the only option. */
+.key-option.only { margin-top: 0; padding-top: 0; border-top: 0; }
+.key-option.only > summary, .key-option.only > .field-hint { display: none; }
+.key-option.only #signin-form { margin-top: 0; }
+.checkbox:last-of-type { margin-bottom: 20px; }
+
+/* Signed in, waiting for access */
+.pending-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--warning-soft);
+  margin-bottom: 18px;
+}
+.pending-icon svg { width: 22px; height: 22px; fill: none; stroke: var(--warning); stroke-width: 1.8; stroke-linecap: round; }
+.signin-sub strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.steps {
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 24px;
+  font-size: 0.875rem;
+}
+.steps-title { font-weight: 600; margin-bottom: 6px; }
+.steps ol { margin: 0; padding-left: 18px; color: var(--text-secondary); }
+.steps li + li { margin-top: 4px; }
+.pending-actions { display: flex; justify-content: center; gap: 8px; margin-top: 12px; }
 
 /* ---------- disclosure (details) ---------- */
 .disclosure { margin-top: 20px; }
