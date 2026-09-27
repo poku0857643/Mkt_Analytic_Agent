@@ -6,116 +6,153 @@
   <title>Marketing Answers</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/vendor/echarts/echarts.min.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <!-- Sign in -->
-  <main id="signin" class="signin" hidden>
-    <div class="signin-card">
-      <h1>Marketing Answers</h1>
-      <p class="lede">Ask questions about your marketing data in plain English. You'll get a short answer, a chart, and files you can drop into a report or slide.</p>
-      <form id="signin-form" novalidate>
-        <label for="key-input">Your access key</label>
-        <input id="key-input" type="password" autocomplete="off" spellcheck="false" required
-               placeholder="Paste the key your admin gave you">
-        <label class="check"><input id="remember" type="checkbox"> Keep me signed in on this computer</label>
-        <p id="signin-error" class="error" role="alert" hidden></p>
-        <button type="submit" class="primary">Sign in</button>
-      </form>
-      <p class="hint">Don't have a key? Ask your analytics admin. Your key is only sent to this site.</p>
+  <a href="#main" class="skip-link">Skip to main content</a>
+
+  <header class="header">
+    <div class="header-inner">
+      <span class="service-name">Marketing Answers</span>
+      <nav id="account" class="account" aria-label="Account" hidden>
+        <span id="who-name"></span>
+        <button id="signout" type="button" class="link-button">Sign out</button>
+      </nav>
     </div>
+  </header>
+
+  <!-- ================= Sign in ================= -->
+  <main id="signin" class="page page-narrow" tabindex="-1" hidden>
+    <div id="signin-errors" class="error-summary" role="alert" tabindex="-1" hidden>
+      <h2 class="error-summary-title">There is a problem</h2>
+      <ul class="error-summary-list"><li><a href="#key-input" id="signin-error-link"></a></li></ul>
+    </div>
+
+    <h1 class="heading-xl">Sign in</h1>
+    <p class="lead">Ask questions about your marketing data in plain English. You get a short answer, a chart, and files you can drop into a report or slide.</p>
+
+    <form id="signin-form" novalidate>
+      <div id="key-group" class="form-group">
+        <label class="label-bold" for="key-input">Access key</label>
+        <p id="key-hint" class="hint">Your admin gives you this. It's a long mix of letters and numbers. Paste it in exactly as you received it.</p>
+        <p id="key-error" class="error-message" hidden></p>
+        <input id="key-input" class="input" type="password" autocomplete="off" spellcheck="false"
+               aria-describedby="key-hint">
+      </div>
+      <div class="form-group">
+        <label class="checkbox"><input id="remember" type="checkbox"> <span>Keep me signed in on this computer</span></label>
+        <p class="hint checkbox-hint">Only tick this on your own computer, not a shared one.</p>
+      </div>
+      <button id="signin-btn" type="submit" class="button">Sign in</button>
+    </form>
+
+    <details class="details">
+      <summary>I don't have an access key</summary>
+      <div class="details-text">Ask your analytics admin for one. Each person gets their own key, which decides what data they can see. Don't share your key with anyone else.</div>
+    </details>
   </main>
 
-  <!-- App -->
-  <div id="app" class="app" hidden>
-    <header class="topbar">
-      <div class="brand">Marketing Answers</div>
-      <div class="who">
-        <span id="who-name"></span>
-        <span id="who-data" class="muted"></span>
-        <button id="signout" class="link">Sign out</button>
-      </div>
-    </header>
-
+  <!-- ================= App ================= -->
+  <div id="app" class="page page-wide" hidden>
     <div class="layout">
-      <aside class="history" aria-label="Your recent questions">
-        <div class="history-head">
-          <h2>Recent questions</h2>
-          <button id="history-clear" class="link" hidden>Clear</button>
-        </div>
-        <ol id="history-list"></ol>
-        <p id="history-empty" class="muted small">Questions you ask will appear here so you can come back to them.</p>
-      </aside>
-
-      <main class="main">
-        <form id="ask-form" class="ask" novalidate>
-          <label for="question">What would you like to know?</label>
-          <textarea id="question" rows="3" maxlength="2000"
-                    placeholder="e.g. Which channel brought in the most revenue last quarter?"></textarea>
-          <div class="ask-row">
-            <span class="muted small">Press <kbd id="mod-key">Ctrl</kbd>+<kbd>Enter</kbd> to ask</span>
-            <button id="ask-btn" type="submit" class="primary">Ask</button>
+      <main id="main" class="main" tabindex="-1">
+        <form id="ask-form" novalidate>
+          <div id="question-group" class="form-group">
+            <h1 class="label-wrapper"><label class="heading-l" for="question">What would you like to know?</label></h1>
+            <p id="question-hint" class="hint">Ask in plain English, as you would ask a colleague. Mention a time period or channel if it matters.</p>
+            <p id="question-error" class="error-message" hidden></p>
+            <textarea id="question" class="textarea" rows="3" maxlength="2000"
+                      aria-describedby="question-hint question-count"></textarea>
+            <p id="question-count" class="hint char-count" aria-live="polite">You can enter up to 2,000 characters</p>
+          </div>
+          <div class="button-row">
+            <button id="ask-btn" type="submit" class="button">Ask</button>
+            <span class="hint shortcut">or press <kbd id="mod-key">Ctrl</kbd> + <kbd>Enter</kbd></span>
           </div>
         </form>
 
-        <section id="examples" class="examples" aria-label="Example questions">
-          <h2>Not sure where to start? Try one of these:</h2>
-          <div id="example-list" class="chips"></div>
-        </section>
-
-        <section id="working" class="card working" hidden aria-live="polite">
+        <section id="working" class="status-panel" hidden aria-live="polite">
           <div class="spinner" aria-hidden="true"></div>
-          <div class="working-text">
-            <p id="working-step" class="step">Reading your question…</p>
-            <p class="muted small"><span id="working-time">0</span>s · Most answers take under a minute.</p>
+          <div class="status-text">
+            <p id="working-step" class="status-step">Reading your question…</p>
+            <p class="hint"><span id="working-time">0</span> seconds. Most answers take under a minute.</p>
           </div>
-          <button id="cancel" class="secondary">Cancel</button>
+          <button id="cancel" type="button" class="button button-secondary">Cancel</button>
         </section>
 
-        <section id="problem" class="card problem" hidden role="alert">
-          <h2 id="problem-title"></h2>
-          <p id="problem-text"></p>
-          <button id="problem-retry" class="secondary" hidden>Try again</button>
-        </section>
-
-        <article id="answer" class="card answer" hidden>
-          <div class="answer-head">
-            <span id="answer-badge" class="badge"></span>
-            <span id="answer-when" class="muted small"></span>
+        <div id="problem" class="banner banner-important" role="alert" tabindex="-1" hidden>
+          <p class="banner-header">Important</p>
+          <div class="banner-body">
+            <h2 id="problem-title" class="heading-m"></h2>
+            <p id="problem-text"></p>
+            <button id="problem-retry" type="button" class="button button-secondary" hidden>Try again</button>
           </div>
-          <h2 id="answer-question" class="answer-question"></h2>
-          <p id="answer-summary" class="summary"></p>
+        </div>
 
-          <figure id="chart-wrap" class="chart" hidden>
-            <figcaption id="chart-title"></figcaption>
-            <div id="chart"></div>
-            <details class="table-toggle">
+        <article id="answer" class="answer" tabindex="-1" hidden aria-labelledby="answer-question">
+          <div id="answer-banner" class="banner">
+            <p id="answer-status" class="banner-header"></p>
+            <div class="banner-body">
+              <p class="caption" id="answer-question"></p>
+              <p id="answer-summary" class="answer-summary"></p>
+            </div>
+          </div>
+
+          <figure id="chart-wrap" class="chart-figure" hidden>
+            <figcaption id="chart-title" class="heading-s"></figcaption>
+            <div id="chart" class="chart"></div>
+            <details class="details">
               <summary>Show the numbers as a table</summary>
-              <div class="table-scroll"><table id="chart-table"></table></div>
+              <div class="details-text table-scroll"><table id="chart-table" class="table"></table></div>
             </details>
           </figure>
 
-          <div class="actions" aria-label="Use this answer">
-            <button id="copy-answer" class="secondary">Copy answer</button>
-            <button id="dl-csv" class="secondary" hidden>Download for Excel (.csv)</button>
-            <button id="dl-png" class="secondary" hidden>Download chart image (.png)</button>
-            <button id="copy-link" class="secondary">Copy link to this question</button>
+          <h2 class="heading-m">Use this answer</h2>
+          <div class="button-group">
+            <button id="copy-answer" type="button" class="button button-secondary">Copy answer</button>
+            <button id="dl-csv" type="button" class="button button-secondary" hidden>Download for Excel (.csv)</button>
+            <button id="dl-png" type="button" class="button button-secondary" hidden>Download chart image (.png)</button>
+            <button id="copy-link" type="button" class="button button-secondary">Copy link to this question</button>
           </div>
           <p id="toast" class="toast" role="status" aria-live="polite"></p>
 
-          <details class="how">
+          <details class="details">
             <summary>How was this worked out?</summary>
-            <p class="small">The assistant ran <span id="how-count"></span> against your data and read <span id="how-bytes"></span>. Every number above comes from the queries below. It can't change or delete data.</p>
-            <div id="how-sql"></div>
-            <p class="muted small">Reference ID (share this if you report a problem): <code id="how-id"></code></p>
+            <div class="details-text">
+              <p>The assistant wrote database queries to answer your question. Every number above comes from the results. It can read data but can never change or delete it.</p>
+              <dl class="summary-list">
+                <div class="summary-row"><dt>Queries run</dt><dd id="how-count"></dd></div>
+                <div class="summary-row"><dt>Data read</dt><dd id="how-bytes"></dd></div>
+                <div class="summary-row"><dt>Answered</dt><dd id="how-when"></dd></div>
+                <div class="summary-row"><dt>Reference ID</dt><dd><code id="how-id"></code><br><span class="hint">Quote this if you report a problem.</span></dd></div>
+              </dl>
+              <div id="how-sql"></div>
+            </div>
           </details>
         </article>
 
-        <footer class="foot muted small">
-          Answers come from an AI assistant reading your company's data. It only sees the datasets your access allows, never personal contact details, and every question is logged. Double-check important numbers before sharing them widely.
-        </footer>
+        <section id="start" class="start" aria-labelledby="start-title">
+          <h2 id="start-title" class="heading-m">What you can ask about</h2>
+          <div id="dataset-list"></div>
+        </section>
       </main>
+
+      <aside class="history" aria-labelledby="history-title">
+        <div class="history-head">
+          <h2 id="history-title" class="heading-s">Your recent questions</h2>
+          <button id="history-clear" type="button" class="link-button" hidden>Clear</button>
+        </div>
+        <ol id="history-list" class="history-list"></ol>
+        <p id="history-empty" class="hint">Questions you ask appear here, so you can come back to them. They're only saved in this browser.</p>
+      </aside>
     </div>
   </div>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <p>Answers come from an AI assistant that reads your company's data. It only sees the data your access allows, never personal contact details, and every question is logged. Check important numbers before sharing them widely.</p>
+    </div>
+  </footer>
 </body>
 </html>

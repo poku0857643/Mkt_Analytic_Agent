@@ -26,7 +26,11 @@ def test_index_needs_no_key(client):
 
 @pytest.mark.parametrize(
     "path, content_type",
-    [("/static/app.js", "javascript"), ("/static/styles.css", "text/css")],
+    [
+        ("/static/app.js", "javascript"),
+        ("/static/styles.css", "text/css"),
+        ("/static/vendor/echarts/echarts.min.js", "javascript"),
+    ],
 )
 def test_assets_served(client, path, content_type):
     response = client.get(path)
@@ -58,3 +62,18 @@ def test_api_docs_keep_their_own_headers(client):
 
 def test_api_routes_not_shadowed(client):
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_chart_library_is_bundled_and_compressed(client):
+    html = client.get("/").text
+    assert 'src="/static/vendor/echarts/echarts.min.js"' in html
+    response = client.get("/static/vendor/echarts/echarts.min.js", headers={"Accept-Encoding": "gzip"})
+    assert response.headers["content-encoding"] == "gzip"
+    assert "content-security-policy" in response.headers
+    assert client.get("/static/vendor/echarts/LICENSE").status_code == 200
+
+
+def test_charts_never_render_tooltips_as_html(client):
+    js = client.get("/static/app.js").text
+    # ECharts tooltips default to HTML; richText draws them on the canvas instead.
+    assert 'renderMode: "richText"' in js

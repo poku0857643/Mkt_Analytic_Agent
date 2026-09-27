@@ -170,11 +170,12 @@ Minimal `.env`:
 GCP_PROJECT=my-gcp-project
 ANTHROPIC_API_KEY=sk-ant-...
 API_KEYS={"<sha256-digest>": {"user": "ana", "role": "analyst"}}
-ROLE_DATASETS={"analyst": ["marketing"], "admin": ["marketing", "customers"]}
+ROLE_DATASETS={"analyst": ["ga4", "marketing"], "admin": ["ga4", "marketing", "customers"]}
 PII_COLUMNS=["customers.customers.email", "customers.customers.phone"]
 ```
 
-No data yet? [Seed the sandbox datasets](#sandbox-data).
+No data yet? [Build the GA4 dataset](#ga4-data-public-sample) (real, anonymised web
+analytics) and/or [seed the sandbox datasets](#sandbox-data).
 
 ## Web app
 
@@ -183,8 +184,9 @@ each person the site's address and their API key; nothing needs installing.
 
 1. **Sign in** by pasting the key. Ticking *Keep me signed in* keeps it in this
    browser; otherwise it's forgotten when the tab closes.
-2. **Ask** in plain English, or click one of the example questions (they match the
-   datasets the person's role can use).
+2. **Ask** in plain English, or click an example. Under *What you can ask about*, each
+   dataset the person's role can use is described in plain words with example
+   questions.
 3. **Read the answer**: a short summary, a chart when it helps, and the numbers as a
    table. *Partly answered* means the data or the security rules didn't allow a full
    answer; the summary says why.
@@ -205,11 +207,22 @@ Recent questions and their answers stay in the sidebar, stored only in that brow
 per-minute limit with a wait time, the daily data allowance, or a timeout with a hint
 to narrow the question.
 
+Interaction patterns follow the [GOV.UK Design System](https://design-system.service.gov.uk/)
+(error summary, hint text, character count, notification banners, summary list,
+high-visibility focus), which is researched with non-specialist users; the branding
+is the app's own. Charts use [Apache ECharts](https://echarts.apache.org/) with hover
+tooltips, and follow fixed specs: one validated series colour per light/dark theme
+(checked for contrast and colour-blind safety), thin bars with rounded ends, value
+labels at the bar tips, and the latest value labelled on line charts.
+
 The app is plain HTML, CSS and JavaScript in `app/static/`, with no build step and
-nothing loaded from other sites. It only calls `/whoami` and `/ask`, so every API
+nothing loaded from other sites. ECharts 6.1.0 is bundled in
+`app/static/vendor/echarts/` (Apache-2.0, checked against its npm integrity hash; see
+`VERSION`) and served gzip-compressed. It only calls `/whoami` and `/ask`, so every API
 protection still applies. The page and its files are sent with a strict
 Content-Security-Policy (same-origin scripts, styles and connections; no framing),
-and server text is always inserted as text, never as HTML. Downloaded CSV cells
+and server text is always inserted as text, never as HTML. Chart tooltips are drawn
+on the canvas (`renderMode: "richText"`) rather than as HTML. Downloaded CSV cells
 that start with `=`, `+`, `-` or `@` are prefixed with `'` so spreadsheets don't run
 them as formulas.
 
@@ -315,13 +328,13 @@ Use `python -m pytest`, not bare `pytest`: it puts the project root on the impor
 | Suite | Needs | Covers |
 |---|---|---|
 | Unit (default) | nothing | Auth, query checks (attack and normal queries), MCP server via an in-process client, agent loop with a scripted fake Claude, `/ask` with the audit log, limits |
-| Integration | `BQ_INTEGRATION_PROJECT` + GCP credentials + [sandbox data](#sandbox-data) | Real BigQuery: schemas, PII flags, results checked against the seed data, real dry-run cost limits, MCP end to end |
-| Live agent | the above + `ANTHROPIC_API_KEY` | Real Claude + BigQuery: known answers, and a request for PII that must not leak. Costs a few cents. |
+| Integration | `BQ_INTEGRATION_PROJECT` + GCP credentials + [sandbox data](#sandbox-data) and [GA4 data](#ga4-data-public-sample) | Real BigQuery: schemas, PII flags, results checked against the seed data, real dry-run cost limits, MCP end to end; GA4 tables consistent (revenue across tables, no duplicate purchases, funnel order), public tables unreachable |
+| Live agent | the above + `ANTHROPIC_API_KEY` | Real Claude + BigQuery: known answers (including GA4's top channel), a ROAS question on GA4 that must be explained as not possible, and a request for PII that must not leak. Costs a few cents. |
 
 Integration and live tests skip themselves when their variables are missing:
 
 ```bash
-BQ_INTEGRATION_PROJECT=my-gcp-project .venv/bin/python -m pytest tests/test_integration_bigquery.py
+BQ_INTEGRATION_PROJECT=my-gcp-project .venv/bin/python -m pytest tests/test_integration_bigquery.py tests/test_integration_ga4.py
 set -a; . ./.env; set +a
 BQ_INTEGRATION_PROJECT=my-gcp-project .venv/bin/python -m pytest tests/test_agent_live.py -v
 ```
@@ -356,7 +369,7 @@ in some projects; the dataset access list works everywhere:
 .venv/bin/python - <<EOF
 from google.cloud import bigquery
 c = bigquery.Client(project="$PROJECT")
-for name in ["marketing", "customers"]:
+for name in ["ga4", "marketing", "customers"]:
     ds = c.get_dataset(name)
     ds.access_entries = [*ds.access_entries,
         bigquery.AccessEntry(role="READER", entity_type="userByEmail", entity_id="$SA")]
@@ -374,6 +387,44 @@ gcloud auth application-default login --impersonate-service-account=$SA
 ```
 
 New IAM grants can take a few minutes to take effect.
+
+### GA4 data (public sample)
+
+`scripts/build_ga4.sql` builds a `ga4` dataset from Google's public
+[GA4 obfuscated e-commerce sample](https://developers.google.com/analytics/bigquery/web-ecommerce-demo-dataset)
+(Google Merchandise Store, 1 Nov 2020 – 31 Jan 2021): real, anonymised web analytics.
+
+The query checks only allow datasets in your own project, so the agent doesn't read
+the public nested event tables directly. The script flattens them once into four
+tables whose descriptions define the metrics and caveats (a small semantic layer):
+
+| Table | Rows | Use for |
+|---|---|---|
+| `ga4.sessions` | 360,129 | Traffic, channel, device, country, landing page, engagement, funnel (viewed item → cart → checkout → purchase), conversion rate |
+| `ga4.purchases` | 5,357 | Orders, revenue, average order value by date, channel, device, country |
+| `ga4.purchase_items` | 15,016 | Top products and categories, units sold |
+| `ga4.users` | 270,154 | New vs returning, acquisition channel, cohorts, customer value |
+
+Details worth knowing:
+
+- **Purchases are de-duplicated.** The sample logs some transactions twice (5,692
+  purchase events, 5,357 purchases). Revenue totals $339,457 in every table.
+- **Channel** is derived from source/medium: Organic Search, Paid Search, Direct,
+  Referral, Affiliates, Email, Unknown. About a third of sessions are *Unknown*
+  because Google obfuscated (`<Other>`, `(data deleted)`) or omitted the source.
+- **No cost data**, so ROAS, CPC and CPA can't be calculated; the table descriptions
+  say so, and the agent explains this instead of guessing (covered by a live test).
+- Building scans about 3.6 GB of public data (well within BigQuery's free 1 TB a month)
+  and takes under a minute. A typical question then reads about 3 MB.
+
+```bash
+bq query --project_id=$PROJECT --location=US --use_legacy_sql=false < scripts/build_ga4.sql
+```
+
+Run it as yourself (`bq` uses your gcloud login, not the app's read-only service
+account), then give the service account read access to `ga4` as shown in
+[Least-privilege service account](#least-privilege-service-account), and add `ga4` to
+`ROLE_DATASETS`.
 
 ### Sandbox data
 
@@ -414,6 +465,7 @@ the service account to the service instead of mounting credentials.
 app/
   api.py             FastAPI app: web app at /, /ask, /whoami, /health; limits, timeout, audit
   static/            Web app (index.html, app.js, styles.css), no build step
+    vendor/echarts/  Bundled Apache ECharts (charts), with licence and version
   agent.py           Claude agent loop, structured answer, retry and turn limits
   mcp_server.py      MCP server exposing list_tables, get_schema, execute_query
   bigquery_tools.py  BigQuery calls behind the MCP tools; checks on every query
@@ -425,6 +477,7 @@ app/
 scripts/
   hash_key.py        Generate an API key and its digest
   seed_sandbox.py    Create sandbox datasets with fake data
+  build_ga4.sql      Build the ga4 dataset from Google's public GA4 sample
 tests/               Unit tests, plus integration and live tests that skip by default
 main.py              Entry point for `uvicorn main:app`
 Dockerfile           Production image
@@ -442,6 +495,7 @@ Dockerfile           Production image
 | 5. `/ask` endpoint and audit log | ✅ Done |
 | 6a. Rate limits, daily budget, timeouts, Docker, CI | ✅ Done |
 | 6a+. Web app for non-technical users | ✅ Done |
+| 6a++. GA4 public data with a semantic layer; web app redesign and ECharts | ✅ Done |
 | 6b. Secret Manager, Cloud Run deployment, Workload Identity Federation for CI | Planned |
 
 Each feature was built on its own branch, each based on the previous one:

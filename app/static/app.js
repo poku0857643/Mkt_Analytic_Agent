@@ -1,34 +1,57 @@
 // Marketing Answers: browser UI for POST /ask.
-// Everything from the server is inserted as text or SVG attributes, never as HTML.
+// Everything from the server is inserted as text (textContent) or handed to
+// ECharts as data, which draws it on a canvas; nothing is parsed as HTML.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
 
 const KEY_NAME = "mkt.key";
 const HISTORY_MAX = 25;
+const QUESTION_MAX = 2000;
+const QUESTION_MIN = 3;
 
-const EXAMPLES = {
-  marketing: [
-    "Which channel brought in the most revenue?",
-    "What was return on ad spend (ROAS) by channel?",
-    "How has weekly ad spend changed over time?",
-    "Which 5 campaigns had the highest click-through rate?",
-    "Which channel has the lowest cost per click?",
-  ],
-  customers: [
-    "Which countries do most of our customers come from?",
-    "How many new customers signed up each month?",
-  ],
+// What each dataset holds, in plain words, with questions it answers well.
+const DATASETS = {
+  ga4: {
+    title: "Website visits and online sales",
+    about: "Google Merchandise Store website: visits, traffic sources, devices, countries, the shopping funnel, orders and products, 1 Nov 2020 to 31 Jan 2021. There is no advertising cost data, so return on ad spend can't be worked out.",
+    examples: [
+      "Which marketing channel brought in the most revenue?",
+      "What was the conversion rate on mobile compared with desktop?",
+      "Where do shoppers drop off between viewing a product and buying?",
+      "What were the top 10 products by revenue?",
+      "How did daily revenue change over the holiday season?",
+      "Which countries have the highest average order value?",
+    ],
+  },
+  marketing: {
+    title: "Campaigns and ad spend",
+    about: "Campaigns, daily ad spend, impressions and clicks, and conversions with revenue, April to September 2026.",
+    examples: [
+      "What was return on ad spend (ROAS) by channel?",
+      "Which channel has the lowest cost per click?",
+      "How has weekly ad spend changed over time?",
+      "Which 5 campaigns had the highest click-through rate?",
+    ],
+  },
+  customers: {
+    title: "Customers",
+    about: "Customer sign-ups by date and country. Names and contact details are protected and can't be shown.",
+    examples: [
+      "Which countries do most of our customers come from?",
+      "How many new customers signed up each month?",
+    ],
+  },
 };
 
-// Progress messages shown while waiting; [seconds elapsed, message].
+// Progress messages while waiting: [seconds elapsed, message].
 const STEPS = [
   [0, "Reading your question…"],
-  [4, "Looking up the right tables…"],
+  [4, "Finding the right data…"],
   [12, "Running the numbers…"],
   [30, "Checking the results…"],
   [60, "Still working. Bigger questions take longer…"],
-  [120, "Almost at the time limit. Hang on…"],
+  [120, "Nearly at the time limit. Hang on…"],
 ];
 
 const state = {
@@ -38,7 +61,11 @@ const state = {
   timer: null,
   current: null, // {id, question, response, at}
   lastQuestion: "",
+  chart: null, // live ECharts instance
 };
+
+// Match the page language rather than the browser's, so text and numbers read consistently.
+const LOCALE = document.documentElement.lang || "en";
 
 // ---------- storage (may be unavailable, e.g. private windows) ----------
 
@@ -51,10 +78,10 @@ function store(persist) {
 }
 
 function readKey() {
-  for (const s of [store(false), store(true)]) {
+  for (const persist of [false, true]) {
     try {
-      const k = s && s.getItem(KEY_NAME);
-      if (k) return { key: k, persist: s === store(true) };
+      const k = store(persist) && store(persist).getItem(KEY_NAME);
+      if (k) return { key: k, persist };
     } catch {}
   }
   return null;
@@ -66,8 +93,8 @@ function saveKey(key, persist) {
 }
 
 function forgetKey() {
-  for (const s of [store(false), store(true)]) {
-    try { s && s.removeItem(KEY_NAME); } catch {}
+  for (const persist of [false, true]) {
+    try { store(persist) && store(persist).removeItem(KEY_NAME); } catch {}
   }
 }
 
@@ -125,18 +152,41 @@ async function api(path, { method = "GET", body, signal, key = state.key } = {})
   return data;
 }
 
+// ---------- field errors (error summary + inline message) ----------
+
+function setFieldError(group, messageEl, input, text) {
+  $(group).classList.toggle("form-group-error", Boolean(text));
+  $(messageEl).hidden = !text;
+  $(messageEl).textContent = text ? "Error: " + text : "";
+  const described = input.getAttribute("aria-describedby").split(" ").filter((id) => id !== messageEl);
+  if (text) described.push(messageEl);
+  input.setAttribute("aria-describedby", described.join(" "));
+  input.setAttribute("aria-invalid", text ? "true" : "false");
+}
+
 // ---------- sign in ----------
 
 function showSignin(message, clearKey = true) {
   $("app").hidden = true;
+  $("account").hidden = true;
   $("signin").hidden = false;
-  const err = $("signin-error");
-  err.textContent = message || "";
-  err.hidden = !message;
+  showSigninError(message || "");
   // On first load, keep anything typed or pasted before the script ran.
   if (clearKey) $("key-input").value = "";
-  $("key-input").focus();
+  if (!message) $("key-input").focus();
 }
+
+function showSigninError(text) {
+  setFieldError("key-group", "key-error", $("key-input"), text);
+  $("signin-errors").hidden = !text;
+  $("signin-error-link").textContent = text;
+  if (text) $("signin-errors").focus();
+}
+
+$("signin-error-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  $("key-input").focus();
+});
 
 async function signIn(key, persist) {
   const user = await api("/whoami", { key });
@@ -149,6 +199,7 @@ async function signIn(key, persist) {
 function signOut(message) {
   cancelAsk();
   forgetKey();
+  disposeChart();
   state.key = null;
   state.user = null;
   state.current = null;
@@ -157,21 +208,21 @@ function signOut(message) {
 
 function signinErrorText(err) {
   if (err instanceof ApiError) {
-    if (err.status === 401) return "That key wasn't recognised. Check you copied all of it, with no spaces.";
-    if (err.status === 403) return "Your key works, but it hasn't been given access to any data yet. Ask your admin to set this up.";
-    return "The service had a problem signing you in. Try again in a minute.";
+    if (err.status === 401) return "That access key wasn't recognised. Check you copied all of it, with no spaces";
+    if (err.status === 403) return "Your key works, but it hasn't been given access to any data yet. Ask your admin to set this up";
+    return "The service had a problem signing you in. Try again in a minute";
   }
-  return "Couldn't reach the service. Check your internet connection and try again.";
+  return "Couldn't reach the service. Check your internet connection and try again";
 }
 
 $("signin-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const key = $("key-input").value.trim();
   if (!key) {
-    showSigninError("Paste your access key first.");
+    showSigninError("Enter your access key");
     return;
   }
-  const btn = e.submitter || e.target.querySelector("button");
+  const btn = $("signin-btn");
   btn.disabled = true;
   btn.textContent = "Signing in…";
   try {
@@ -184,12 +235,6 @@ $("signin-form").addEventListener("submit", async (e) => {
   }
 });
 
-function showSigninError(text) {
-  const err = $("signin-error");
-  err.textContent = text;
-  err.hidden = false;
-}
-
 $("signout").addEventListener("click", () => signOut());
 
 // ---------- app shell ----------
@@ -198,31 +243,55 @@ function showApp() {
   if (/Mac|iPhone|iPad/.test(navigator.platform)) $("mod-key").textContent = "⌘";
   $("signin").hidden = true;
   $("app").hidden = false;
+  $("account").hidden = false;
   $("who-name").textContent = "Signed in as " + state.user.user;
-  $("who-data").textContent = "· Data you can use: " + state.user.allowed_datasets.join(", ");
-  renderExamples();
+  renderDatasets();
   renderHistory();
   resetView();
 
   const q = new URLSearchParams(location.search).get("q");
-  if (q) $("question").value = q.slice(0, 2000);
+  if (q) $("question").value = q.slice(0, QUESTION_MAX);
+  updateCount();
   $("question").focus();
 }
 
-function renderExamples() {
-  const list = $("example-list");
+function renderDatasets() {
+  const list = $("dataset-list");
   list.replaceChildren();
-  const questions = state.user.allowed_datasets.flatMap((d) => EXAMPLES[d] || []);
-  if (!questions.length) questions.push("What tables can I ask about, and what's in them?");
-  for (const q of questions) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = q;
-    b.addEventListener("click", () => {
-      $("question").value = q;
-      ask(q);
-    });
-    list.append(b);
+  const known = state.user.allowed_datasets.filter((d) => DATASETS[d]);
+  const unknown = state.user.allowed_datasets.filter((d) => !DATASETS[d]);
+  for (const name of known) {
+    const info = DATASETS[name];
+    const card = document.createElement("section");
+    card.className = "dataset";
+    const h = document.createElement("h3");
+    h.className = "heading-s";
+    h.textContent = info.title;
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = info.about;
+    const ul = document.createElement("ul");
+    for (const q of info.examples) {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "link-button";
+      b.textContent = q;
+      b.addEventListener("click", () => {
+        $("question").value = q;
+        updateCount();
+        ask(q);
+      });
+      li.append(b);
+      ul.append(li);
+    }
+    card.append(h, p, ul);
+    list.append(card);
+  }
+  if (unknown.length) {
+    const p = document.createElement("p");
+    p.textContent = `You can also ask about: ${unknown.join(", ")}. Try "What tables can I ask about, and what's in them?"`;
+    list.append(p);
   }
 }
 
@@ -230,8 +299,27 @@ function resetView() {
   $("answer").hidden = true;
   $("problem").hidden = true;
   $("working").hidden = true;
-  $("examples").hidden = false;
+  $("start").hidden = false;
+  disposeChart();
 }
+
+// ---------- character count ----------
+
+function updateCount() {
+  const left = QUESTION_MAX - $("question").value.length;
+  const el = $("question-count");
+  el.textContent = left >= 0
+    ? `You have ${left.toLocaleString(LOCALE)} character${left === 1 ? "" : "s"} remaining`
+    : `You have ${(-left).toLocaleString(LOCALE)} characters too many`;
+  el.classList.toggle("over", left < 0);
+}
+
+$("question").addEventListener("input", () => {
+  updateCount();
+  if ($("question-group").classList.contains("form-group-error")) {
+    setFieldError("question-group", "question-error", $("question"), "");
+  }
+});
 
 // ---------- history ----------
 
@@ -243,12 +331,17 @@ function renderHistory() {
     const li = document.createElement("li");
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = item.question;
-    b.title = item.question;
+    b.className = "link-button";
+    b.append(item.question);
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = formatWhen(item.at);
+    b.append(when);
     if (state.current && state.current.id === item.id) b.setAttribute("aria-current", "true");
     b.addEventListener("click", () => {
       if (state.controller) return;
       $("question").value = item.question;
+      updateCount();
       showAnswer(item);
       renderHistory();
     });
@@ -281,6 +374,7 @@ $("question").addEventListener("keydown", (e) => {
 $("cancel").addEventListener("click", () => {
   cancelAsk();
   resetView();
+  $("question").focus();
 });
 
 $("problem-retry").addEventListener("click", () => ask(state.lastQuestion));
@@ -297,18 +391,26 @@ function setBusy(busy) {
   $("ask-btn").textContent = busy ? "Working…" : "Ask";
 }
 
+function validateQuestion(question) {
+  if (!question) return "Enter a question, or choose one of the examples below";
+  if (question.length < QUESTION_MIN) return "Your question is too short. Use a few words, for example 'Revenue by channel'";
+  if (question.length > QUESTION_MAX) return "Your question must be 2,000 characters or fewer";
+  return "";
+}
+
 async function ask(raw) {
-  const question = (raw || "").trim();
   if (state.controller) return;
-  if (question.length < 3) {
-    showProblem("Question too short", "Type a question of at least a few words, or pick one of the examples.");
+  const question = (raw || "").trim();
+  const invalid = validateQuestion(question);
+  setFieldError("question-group", "question-error", $("question"), invalid);
+  if (invalid) {
+    $("question").focus();
     return;
   }
   state.lastQuestion = question;
 
-  $("answer").hidden = true;
-  $("problem").hidden = true;
-  $("examples").hidden = true;
+  resetView();
+  $("start").hidden = true;
   $("working").hidden = false;
   setBusy(true);
 
@@ -332,7 +434,7 @@ async function ask(raw) {
   } catch (err) {
     if (err.name === "AbortError") return;
     if (err instanceof ApiError && err.status === 401) {
-      signOut("Your access key is no longer valid. Please sign in again.");
+      signOut("Your access key is no longer valid. Sign in again");
       return;
     }
     const [title, text, retry] = askErrorText(err);
@@ -353,20 +455,20 @@ function askErrorText(err) {
   }
   switch (err.status) {
     case 403:
-      return ["No data access", "Your key hasn't been given access to any data. Ask your admin to set this up.", false];
+      return ["You don't have access to any data", "Your key hasn't been given access to any data. Ask your admin to set this up.", false];
     case 422:
-      return ["Question not accepted", "Questions need to be between 3 and 2,000 characters.", false];
+      return ["Your question wasn't accepted", "Questions need to be between 3 and 2,000 characters.", false];
     case 429:
       if (err.retryAfter) {
-        return ["Slow down a little", `You've asked several questions in the last minute. Try again in about ${err.retryAfter} seconds.`, true];
+        return ["You're asking questions too quickly", `You've asked several questions in the last minute. Wait about ${err.retryAfter} seconds, then try again.`, true];
       }
-      return ["Daily limit reached", "You've used today's data allowance. It resets at midnight UTC. If you need more, ask your admin.", false];
+      return ["You've reached today's data limit", "You've used today's allowance for reading data. It resets at midnight UTC. If you need more, ask your admin.", false];
     case 502:
-      return ["The AI service is busy", "The assistant is temporarily unavailable. Try again in a minute or two.", true];
+      return ["The assistant is busy", "The AI service is temporarily unavailable. Try again in a minute or two.", true];
     case 504:
-      return ["That took too long", "Try a narrower question, for example one channel, one campaign or a shorter date range.", true];
+      return ["That question took too long", "Try a narrower question, for example one channel, one product or a shorter date range.", true];
     default:
-      return ["Something went wrong", "The question couldn't be answered. Try again, or rephrase it. If it keeps happening, tell your admin.", true];
+      return ["Something went wrong", "Your question couldn't be answered. Try again, or rephrase it. If it keeps happening, tell your admin.", true];
   }
 }
 
@@ -375,25 +477,29 @@ function showProblem(title, text, retry = false) {
   $("problem-text").textContent = text;
   $("problem-retry").hidden = !retry;
   $("problem").hidden = false;
+  $("start").hidden = false;
+  $("problem").focus();
 }
 
 // ---------- answer ----------
+
+function hasChart(response) {
+  return Boolean(response.chart && response.chart.points && response.chart.points.length);
+}
 
 function showAnswer(item) {
   state.current = item;
   const r = item.response;
   resetView();
-  $("examples").hidden = true;
+  $("start").hidden = true;
 
   const answered = r.status === "answered";
-  const badge = $("answer-badge");
-  badge.textContent = answered ? "Answered" : "Partly answered";
-  badge.className = "badge " + (answered ? "ok" : "warn");
-  $("answer-when").textContent = new Date(item.at).toLocaleString(LOCALE, { dateStyle: "medium", timeStyle: "short" });
+  $("answer-banner").className = "banner" + (answered ? " banner-success" : "");
+  $("answer-status").textContent = answered ? "Answer" : "Partly answered: the data couldn't fully answer this";
   $("answer-question").textContent = item.question;
   $("answer-summary").textContent = r.summary;
 
-  const chart = r.chart && r.chart.points && r.chart.points.length ? r.chart : null;
+  const chart = hasChart(r) ? r.chart : null;
   $("chart-wrap").hidden = !chart;
   $("dl-csv").hidden = !chart;
   $("dl-png").hidden = !chart;
@@ -405,50 +511,233 @@ function showAnswer(item) {
   const n = r.sql_used.length;
   $("how-count").textContent = n === 1 ? "1 query" : `${n} queries`;
   $("how-bytes").textContent = formatBytes(r.bytes_processed);
+  $("how-when").textContent = formatWhen(item.at);
   $("how-id").textContent = r.request_id;
   const sql = $("how-sql");
   sql.replaceChildren();
   r.sql_used.forEach((q, i) => {
+    const h = document.createElement("h3");
+    h.className = "heading-s";
+    h.textContent = n > 1 ? `Query ${i + 1}` : "Query";
     const pre = document.createElement("pre");
     pre.textContent = q;
-    pre.setAttribute("aria-label", `Query ${i + 1}`);
-    sql.append(pre);
+    sql.append(h, pre);
   });
   $("toast").textContent = "";
   $("answer").hidden = false;
   drawChart();
+  $("answer").focus();
 }
 
-// Charts are drawn at the width they are shown, so their text stays readable.
+function renderTable(chart) {
+  const table = $("chart-table");
+  table.replaceChildren();
+  const cap = table.createCaption();
+  cap.className = "hint";
+  cap.textContent = chart.title;
+  const head = table.createTHead().insertRow();
+  [chart.x_label, chart.y_label].forEach((h, i) => {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = h;
+    if (i === 1) th.className = "num";
+    head.append(th);
+  });
+  const body = table.createTBody();
+  for (const p of chart.points) {
+    const row = body.insertRow();
+    const th = document.createElement("th");
+    th.scope = "row";
+    th.textContent = p.label;
+    row.append(th);
+    const td = row.insertCell();
+    td.className = "num";
+    td.textContent = formatNumber(p.value);
+  }
+}
+
+// ---------- charts (Apache ECharts, bundled locally) ----------
+
+function palette(forExport) {
+  if (forExport) {
+    // Exported images always use the light palette so they suit slides and documents.
+    return { surface: "#ffffff", text: "#0b0c0c", muted: "#484949", grid: "#e6e8ea", series: "#2a78d6" };
+  }
+  const css = getComputedStyle(document.documentElement);
+  const v = (name) => css.getPropertyValue(name).trim();
+  return { surface: v("--chart-surface"), text: v("--text"), muted: v("--text-secondary"), grid: v("--chart-grid"), series: v("--chart-series") };
+}
+
+function chartOption(chart, p, { forExport = false } = {}) {
+  const font = { fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
+  const labels = chart.points.map((d) => d.label);
+  const values = chart.points.map((d) => d.value);
+  const axisText = { color: p.muted, fontSize: 12, ...font };
+  const nameText = { color: p.muted, fontSize: 12, ...font };
+  const valueAxis = {
+    type: "value",
+    axisLabel: { ...axisText, formatter: (v) => formatCompact(v) },
+    splitLine: { lineStyle: { color: p.grid, width: 1, type: "solid" } },
+    axisLine: { show: false },
+    axisTick: { show: false },
+  };
+  const tooltip = {
+    // Rendered on the canvas, never as HTML.
+    renderMode: "richText",
+    backgroundColor: p.surface,
+    borderColor: p.grid,
+    textStyle: { color: p.text, fontSize: 13, ...font },
+    confine: true,
+  };
+  const base = {
+    animation: !forExport,
+    backgroundColor: forExport ? p.surface : "transparent",
+    textStyle: font,
+    aria: { enabled: true },
+    title: forExport
+      ? { text: chart.title, left: 16, top: 12, textStyle: { color: p.text, fontSize: 18, fontWeight: 600, ...font } }
+      : undefined,
+  };
+  const top = forExport ? 56 : 12;
+
+  if (chart.type === "line") {
+    const showDots = values.length <= 60;
+    return {
+      ...base,
+      // Extra room at the top for the y-axis title.
+      grid: { left: 16, right: 56, top: top + 30, bottom: 44, containLabel: true },
+      tooltip: {
+        ...tooltip,
+        trigger: "axis",
+        axisPointer: { type: "line", lineStyle: { color: p.muted, width: 1 } },
+        formatter: (items) => {
+          const it = Array.isArray(items) ? items[0] : items;
+          return `${it.name}\n${chart.y_label}: ${formatNumber(it.value)}`;
+        },
+      },
+      xAxis: {
+        type: "category",
+        data: labels,
+        boundaryGap: false,
+        name: chart.x_label,
+        nameLocation: "middle",
+        nameGap: 30,
+        nameTextStyle: nameText,
+        axisLabel: { ...axisText, hideOverlap: true },
+        axisLine: { lineStyle: { color: p.grid } },
+        axisTick: { show: false },
+      },
+      yAxis: { ...valueAxis, name: chart.y_label, nameGap: 14, nameTextStyle: { ...nameText, align: "left" } },
+      series: [{
+        type: "line",
+        data: values,
+        lineStyle: { width: 2, color: p.series, cap: "round", join: "round" },
+        itemStyle: { color: p.series, borderColor: p.surface, borderWidth: 2 },
+        symbol: "circle",
+        symbolSize: 8,
+        showSymbol: showDots,
+        areaStyle: { color: p.series, opacity: 0.1 },
+        emphasis: { focus: "none", scale: 1.4 },
+        // Label only the latest value; the axis, tooltip and table carry the rest.
+        endLabel: { show: true, color: p.text, fontWeight: 600, fontSize: 12, formatter: (d) => formatCompact(d.value), ...font },
+      }],
+    };
+  }
+
+  // Horizontal bars keep long category names readable. First item at the top.
+  return {
+    ...base,
+    grid: { left: 16, right: 64, top, bottom: 40, containLabel: true },
+    tooltip: {
+      ...tooltip,
+      trigger: "item",
+      formatter: (d) => `${d.name}\n${chart.y_label}: ${formatNumber(d.value)}`,
+    },
+    yAxis: {
+      type: "category",
+      data: labels,
+      inverse: true,
+      axisLabel: { color: p.text, fontSize: 13, ...font, width: 180, overflow: "truncate" },
+      axisLine: { lineStyle: { color: p.grid } },
+      axisTick: { show: false },
+    },
+    xAxis: { ...valueAxis, name: chart.y_label, nameLocation: "middle", nameGap: 28, nameTextStyle: nameText },
+    series: [{
+      type: "bar",
+      data: values.map((v) => ({
+        value: v,
+        // 4px rounded data end, square at the baseline.
+        itemStyle: { borderRadius: v < 0 ? [4, 0, 0, 4] : [0, 4, 4, 0] },
+      })),
+      barMaxWidth: 24,
+      barCategoryGap: "35%",
+      itemStyle: { color: p.series },
+      emphasis: { itemStyle: { opacity: 0.85 } },
+      label: {
+        show: true,
+        position: "right",
+        color: p.text,
+        fontSize: 12,
+        fontWeight: 600,
+        ...font,
+        formatter: (d) => formatNumber(d.value),
+      },
+    }],
+  };
+}
+
+function chartHeight(chart, forExport = false) {
+  const extra = forExport ? 44 : 0;
+  if (chart.type === "line") return 340 + extra;
+  return Math.max(200, chart.points.length * 36 + 70) + extra;
+}
+
 function drawChart() {
+  disposeChart();
   const chart = state.current && state.current.response.chart;
-  if (!chart || !chart.points || !chart.points.length || $("answer").hidden) return;
-  const width = Math.max(300, Math.floor($("chart").clientWidth) || 720);
-  $("chart").replaceChildren(renderChart(chart, cssPalette(), false, width));
+  if (!chart || !hasChart(state.current.response) || $("answer").hidden || !window.echarts) return;
+  const el = $("chart");
+  el.style.height = chartHeight(chart) + "px";
+  state.chart = window.echarts.init(el, null, { renderer: "canvas" });
+  state.chart.setOption(chartOption(chart, palette(false)));
+}
+
+function disposeChart() {
+  if (state.chart) {
+    state.chart.dispose();
+    state.chart = null;
+  }
 }
 
 let resizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(drawChart, 150);
+  resizeTimer = setTimeout(() => state.chart && state.chart.resize(), 100);
+});
+// Redraw with the other palette when the system switches light/dark mode.
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (state.chart) drawChart();
 });
 
-function renderTable(chart) {
-  const table = $("chart-table");
-  table.replaceChildren();
-  const head = table.createTHead().insertRow();
-  for (const h of [chart.x_label, chart.y_label]) {
-    const th = document.createElement("th");
-    th.textContent = h;
-    head.append(th);
-  }
-  const body = table.createTBody();
-  for (const p of chart.points) {
-    const row = body.insertRow();
-    row.insertCell().textContent = p.label;
-    const td = row.insertCell();
-    td.className = "num";
-    td.textContent = formatNumber(p.value);
+function chartPng(chart) {
+  // Render off screen at a fixed, slide-friendly size, then discard.
+  const host = document.createElement("div");
+  host.style.position = "fixed";
+  host.style.left = "-10000px";
+  host.style.top = "0";
+  host.style.width = "960px";
+  host.style.height = chartHeight(chart, true) + "px";
+  document.body.append(host);
+  const instance = window.echarts.init(host, null, { renderer: "canvas" });
+  try {
+    instance.setOption(chartOption(chart, palette(true), { forExport: true }));
+    const url = instance.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: "#ffffff" });
+    // Decode here: fetch() of a data: URL is blocked by the page's connect-src policy.
+    const bytes = Uint8Array.from(atob(url.split(",")[1]), (c) => c.charCodeAt(0));
+    return new Blob([bytes], { type: "image/png" });
+  } finally {
+    instance.dispose();
+    host.remove();
   }
 }
 
@@ -456,7 +745,7 @@ function renderTable(chart) {
 
 function toast(text) {
   $("toast").textContent = text;
-  setTimeout(() => { if ($("toast").textContent === text) $("toast").textContent = ""; }, 3000);
+  setTimeout(() => { if ($("toast").textContent === text) $("toast").textContent = ""; }, 4000);
 }
 
 async function copyText(text) {
@@ -479,24 +768,28 @@ async function copyText(text) {
 function answerAsText(item) {
   const r = item.response;
   const lines = [item.question, "", r.summary];
-  if (r.chart && r.chart.points.length) {
+  if (hasChart(r)) {
     lines.push("", r.chart.title);
     for (const p of r.chart.points) lines.push(`- ${p.label}: ${formatNumber(p.value)}`);
   }
-  lines.push("", `Source: Marketing Answers, ${new Date(item.at).toLocaleDateString(LOCALE, { dateStyle: "medium" })} (ref ${r.request_id})`);
+  lines.push("", `Source: Marketing Answers, ${formatWhen(item.at)} (ref ${r.request_id})`);
   return lines.join("\n");
 }
 
 $("copy-answer").addEventListener("click", async () => {
   if (!state.current) return;
-  toast((await copyText(answerAsText(state.current))) ? "Copied. Paste it into an email, doc or chat." : "Couldn't copy. Select the text and copy it instead.");
+  toast((await copyText(answerAsText(state.current)))
+    ? "Answer copied. Paste it into an email, document or chat."
+    : "Couldn't copy. Select the text and copy it instead.");
 });
 
 $("copy-link").addEventListener("click", async () => {
   if (!state.current) return;
   const url = new URL(location.pathname, location.origin);
   url.searchParams.set("q", state.current.question);
-  toast((await copyText(url.toString())) ? "Link copied. Anyone with access can open it to ask the same question." : "Couldn't copy the link.");
+  toast((await copyText(url.toString()))
+    ? "Link copied. Colleagues with access can open it to ask the same question."
+    : "Couldn't copy the link.");
 });
 
 function csvCell(value) {
@@ -533,196 +826,36 @@ $("dl-csv").addEventListener("click", () => {
 
 $("dl-png").addEventListener("click", async () => {
   const chart = state.current && state.current.response.chart;
-  if (!chart) return;
+  if (!chart || !window.echarts) return;
   try {
-    const blob = await chartPng(chart);
-    download(blob, fileName(chart.title, "png"));
+    download(await chartPng(chart), fileName(chart.title, "png"));
     toast("Downloaded. Drop it into a slide or document.");
   } catch {
     toast("Couldn't create the image in this browser.");
   }
 });
 
-// Exported images always use the light palette so they suit slides and documents.
-const LIGHT = { bg: "#ffffff", text: "#1c2430", muted: "#5d6878", grid: "#dde2e8", accent: "#2458d6" };
-
-function cssPalette() {
-  const css = getComputedStyle(document.documentElement);
-  const v = (name) => css.getPropertyValue(name).trim();
-  return { bg: v("--surface"), text: v("--text"), muted: v("--muted"), grid: v("--border"), accent: v("--accent") };
-}
-
-function chartPng(chart) {
-  const svg = renderChart(chart, LIGHT, true);
-  const w = Number(svg.getAttribute("width"));
-  const h = Number(svg.getAttribute("height"));
-  const src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(svg));
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const scale = 2;
-      const canvas = document.createElement("canvas");
-      canvas.width = w * scale;
-      canvas.height = h * scale;
-      const ctx = canvas.getContext("2d");
-      ctx.scale(scale, scale);
-      ctx.drawImage(img, 0, 0, w, h);
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png");
-    };
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-// ---------- charts (plain SVG) ----------
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-const FONT = "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-
-function el(name, attrs = {}, text) {
-  const node = document.createElementNS(SVG_NS, name);
-  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function textEl(x, y, str, p, attrs = {}) {
-  return el("text", { x, y, fill: p.text, "font-size": 13, "font-family": FONT, ...attrs }, str);
-}
-
-function niceTicks(min, max, count = 5) {
-  if (min === max) max = min + 1;
-  const raw = (max - min) / count;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
-  const ticks = [];
-  for (let t = Math.floor(min / step) * step; t <= max + step * 1e-9; t += step) ticks.push(+t.toFixed(10));
-  if (ticks[ticks.length - 1] < max) ticks.push(ticks[ticks.length - 1] + step);
-  return ticks;
-}
-
-function truncate(s, n) {
-  return s.length > n ? s.slice(0, n - 1) + "…" : s;
-}
-
-function renderChart(chart, p, forExport = false, width = 720) {
-  const svg = chart.type === "line" ? lineChart(chart, p, width) : barChart(chart, p, width);
-  svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", chart.title);
-  if (forExport) {
-    // Title and background baked in so the image stands alone.
-    const w = Number(svg.getAttribute("width"));
-    const h = Number(svg.getAttribute("height"));
-    const pad = 36;
-    const out = el("svg", { xmlns: SVG_NS, width: w + 32, height: h + pad + 16, viewBox: `0 0 ${w + 32} ${h + pad + 16}` });
-    out.append(el("rect", { width: "100%", height: "100%", fill: p.bg }));
-    out.append(textEl(16, 26, chart.title, p, { "font-size": 16, "font-weight": 600 }));
-    const g = el("g", { transform: `translate(16 ${pad})` });
-    g.append(...svg.childNodes);
-    out.append(g);
-    return out;
-  }
-  return svg;
-}
-
-// Horizontal bars: long category names stay readable.
-function barChart(chart, p, W) {
-  const pts = chart.points;
-  const rowH = 32;
-  const labelW = Math.min(220, W * 0.32, Math.max(60, Math.max(...pts.map((d) => d.label.length)) * 7.5 + 12));
-  const valueW = 72;
-  const top = 4;
-  const axisH = 36;
-  const H = top + pts.length * rowH + axisH;
-  const x0 = labelW;
-  const x1 = W - valueW;
-  const lo = Math.min(0, ...pts.map((d) => d.value));
-  const hi = Math.max(0, ...pts.map((d) => d.value));
-  const ticks = niceTicks(lo, hi);
-  const tmin = ticks[0];
-  const tmax = ticks[ticks.length - 1];
-  const sx = (v) => x0 + ((v - tmin) / (tmax - tmin)) * (x1 - x0);
-
-  const svg = el("svg", { xmlns: SVG_NS, width: W, height: H, viewBox: `0 0 ${W} ${H}` });
-  for (const t of ticks) {
-    svg.append(el("line", { x1: sx(t), x2: sx(t), y1: top, y2: top + pts.length * rowH, stroke: p.grid, "stroke-width": 1 }));
-    svg.append(textEl(sx(t), top + pts.length * rowH + 16, formatCompact(t), p, { fill: p.muted, "text-anchor": "middle", "font-size": 12 }));
-  }
-  pts.forEach((d, i) => {
-    const y = top + i * rowH;
-    const a = sx(Math.min(0, d.value));
-    const b = sx(Math.max(0, d.value));
-    const bar = el("rect", { x: a, y: y + 6, width: Math.max(b - a, 1), height: rowH - 12, rx: 3, fill: p.accent });
-    bar.append(el("title", {}, `${d.label}: ${formatNumber(d.value)}`));
-    svg.append(bar);
-    svg.append(textEl(labelW - 8, y + rowH / 2 + 4, truncate(d.label, Math.floor(labelW / 7.5)), p, { "text-anchor": "end" }));
-    svg.append(textEl(b + 6, y + rowH / 2 + 4, formatNumber(d.value), p, { "font-weight": 600 }));
-  });
-  svg.append(textEl((x0 + x1) / 2, H - 4, chart.y_label, p, { fill: p.muted, "text-anchor": "middle" }));
-  return svg;
-}
-
-function lineChart(chart, p, W) {
-  const pts = chart.points;
-  const H = Math.round(Math.min(340, Math.max(240, W * 0.5)));
-  const m = { l: 64, r: 20, t: 12, b: 56 };
-  const lo = Math.min(...pts.map((d) => d.value));
-  const hi = Math.max(...pts.map((d) => d.value));
-  const ticks = niceTicks(Math.min(0, lo), hi);
-  const tmin = ticks[0];
-  const tmax = ticks[ticks.length - 1];
-  const sx = (i) => m.l + (pts.length === 1 ? 0.5 : i / (pts.length - 1)) * (W - m.l - m.r);
-  const sy = (v) => H - m.b - ((v - tmin) / (tmax - tmin)) * (H - m.t - m.b);
-
-  const svg = el("svg", { xmlns: SVG_NS, width: W, height: H, viewBox: `0 0 ${W} ${H}` });
-  for (const t of ticks) {
-    svg.append(el("line", { x1: m.l, x2: W - m.r, y1: sy(t), y2: sy(t), stroke: p.grid, "stroke-width": 1 }));
-    svg.append(textEl(m.l - 8, sy(t) + 4, formatCompact(t), p, { fill: p.muted, "text-anchor": "end", "font-size": 12 }));
-  }
-  // Label every nth point, always including the last; drop a label that would crowd it.
-  const every = Math.max(1, Math.ceil(pts.length / Math.max(3, Math.floor(W / 100))));
-  const last = pts.length - 1;
-  pts.forEach((d, i) => {
-    const show = i === last || (i % every === 0 && (last - i >= every * 0.75 || i === 0));
-    if (!show) return;
-    const anchor = pts.length > 1 && i === last ? "end" : "middle";
-    svg.append(textEl(sx(i), H - m.b + 18, truncate(d.label, 14), p, { fill: p.muted, "text-anchor": anchor, "font-size": 12 }));
-  });
-  const path = pts.map((d, i) => `${i ? "L" : "M"}${sx(i).toFixed(1)},${sy(d.value).toFixed(1)}`).join(" ");
-  svg.append(el("path", { d: path, fill: "none", stroke: p.accent, "stroke-width": 2.5, "stroke-linejoin": "round" }));
-  if (pts.length <= 60) {
-    pts.forEach((d, i) => {
-      const dot = el("circle", { cx: sx(i), cy: sy(d.value), r: 3.5, fill: p.accent });
-      dot.append(el("title", {}, `${d.label}: ${formatNumber(d.value)}`));
-      svg.append(dot);
-    });
-  }
-  svg.append(textEl((m.l + W - m.r) / 2, H - 8, chart.x_label, p, { fill: p.muted, "text-anchor": "middle" }));
-  svg.append(textEl(14, (m.t + H - m.b) / 2, chart.y_label, p, {
-    fill: p.muted, "text-anchor": "middle", transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})`,
-  }));
-  return svg;
-}
-
 // ---------- formatting ----------
 
-// Match the page language rather than the browser's, so text and numbers read consistently.
-const LOCALE = document.documentElement.lang || "en";
-
 function formatNumber(v) {
-  return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: Math.abs(v) < 10 ? 2 : Math.abs(v) < 1000 ? 1 : 0 }).format(v);
+  const a = Math.abs(v);
+  return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: a < 10 ? 2 : a < 1000 ? 1 : 0 }).format(v);
 }
 
 function formatCompact(v) {
   return new Intl.NumberFormat(LOCALE, { notation: "compact", maximumFractionDigits: 1 }).format(v);
 }
 
+function formatWhen(iso) {
+  return new Date(iso).toLocaleString(LOCALE, { dateStyle: "medium", timeStyle: "short" });
+}
+
 function formatBytes(n) {
-  if (!n) return "no stored data (answered from table details)";
+  if (!n) return "None: answered from the table descriptions";
   const units = ["bytes", "KB", "MB", "GB", "TB"];
   let i = 0;
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-  return `${i ? n.toFixed(1) : n} ${units[i]} of data`;
+  return `${i ? n.toFixed(1) : n} ${units[i]}`;
 }
 
 // ---------- start ----------
@@ -738,7 +871,7 @@ function formatBytes(n) {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
       signOut(signinErrorText(err));
     } else {
-      // Keep the key; the service may just be down for a moment.
+      // Keep the saved key; the service may just be down for a moment.
       state.key = null;
       showSignin(signinErrorText(err));
     }

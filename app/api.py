@@ -8,6 +8,7 @@ from typing import Annotated
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import bigquery
@@ -25,6 +26,8 @@ app = FastAPI(title="Marketing Analytics Agent")
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# The bundled chart library is ~1.1 MB; compressed it is about a third of that.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # The web UI loads nothing from other origins. /docs (Swagger) is left alone
 # because it pulls its assets from a CDN.
