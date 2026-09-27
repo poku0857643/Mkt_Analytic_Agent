@@ -207,18 +207,20 @@ Recent questions and their answers stay in the sidebar, stored only in that brow
 per-minute limit with a wait time, the daily data allowance, or a timeout with a hint
 to narrow the question.
 
-Interaction patterns follow the [GOV.UK Design System](https://design-system.service.gov.uk/)
-(error summary, hint text, character count, notification banners, summary list,
-high-visibility focus), which is researched with non-specialist users; the branding
-is the app's own. Charts use [Apache ECharts](https://echarts.apache.org/) with hover
-tooltips, and follow fixed specs: one validated series colour per light/dark theme
+The look is a calm, product-style design: the Inter typeface, a neutral palette with
+one blue accent, hairline borders, rounded inputs with focus rings and custom
+checkboxes, with light and dark themes. Text and controls meet WCAG AA contrast
+(4.5:1 for text, 3:1 for input borders), errors appear under the field they belong
+to, and focus is always visible. Charts use [Apache ECharts](https://echarts.apache.org/)
+with hover tooltips, and follow fixed specs: one validated series colour per theme
 (checked for contrast and colour-blind safety), thin bars with rounded ends, value
 labels at the bar tips, and the latest value labelled on line charts.
 
 The app is plain HTML, CSS and JavaScript in `app/static/`, with no build step and
-nothing loaded from other sites. ECharts 6.1.0 is bundled in
-`app/static/vendor/echarts/` (Apache-2.0, checked against its npm integrity hash; see
-`VERSION`) and served gzip-compressed. It only calls `/whoami` and `/ask`, so every API
+nothing loaded from other sites. ECharts 6.1.0 (Apache-2.0) and the
+Inter variable font 5.3.0 (SIL OFL 1.1) are bundled in `app/static/vendor/`, each
+checked against its npm integrity hash (see their `VERSION` files) and served
+gzip-compressed. It only calls `/whoami` and `/ask`, so every API
 protection still applies. The page and its files are sent with a strict
 Content-Security-Policy (same-origin scripts, styles and connections; no framing),
 and server text is always inserted as text, never as HTML. Chart tooltips are drawn
@@ -465,7 +467,7 @@ the service account to the service instead of mounting credentials.
 app/
   api.py             FastAPI app: web app at /, /ask, /whoami, /health; limits, timeout, audit
   static/            Web app (index.html, app.js, styles.css), no build step
-    vendor/echarts/  Bundled Apache ECharts (charts), with licence and version
+    vendor/          Bundled Apache ECharts and Inter font, with licences and versions
   agent.py           Claude agent loop, structured answer, retry and turn limits
   mcp_server.py      MCP server exposing list_tables, get_schema, execute_query
   bigquery_tools.py  BigQuery calls behind the MCP tools; checks on every query

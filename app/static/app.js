@@ -155,9 +155,9 @@ async function api(path, { method = "GET", body, signal, key = state.key } = {})
 // ---------- field errors (error summary + inline message) ----------
 
 function setFieldError(group, messageEl, input, text) {
-  $(group).classList.toggle("form-group-error", Boolean(text));
+  $(group).classList.toggle("is-error", Boolean(text));
   $(messageEl).hidden = !text;
-  $(messageEl).textContent = text ? "Error: " + text : "";
+  $(messageEl).textContent = text ? text + "." : "";
   const described = input.getAttribute("aria-describedby").split(" ").filter((id) => id !== messageEl);
   if (text) described.push(messageEl);
   input.setAttribute("aria-describedby", described.join(" "));
@@ -170,23 +170,18 @@ function showSignin(message, clearKey = true) {
   $("app").hidden = true;
   $("account").hidden = true;
   $("signin").hidden = false;
-  showSigninError(message || "");
   // On first load, keep anything typed or pasted before the script ran.
   if (clearKey) $("key-input").value = "";
-  if (!message) $("key-input").focus();
+  showSigninError(message || "");
+  $("key-input").focus();
 }
 
+// One field, so the error sits under it (role="alert" announces it) and focus
+// returns to the field; a separate error summary would only repeat it.
 function showSigninError(text) {
   setFieldError("key-group", "key-error", $("key-input"), text);
-  $("signin-errors").hidden = !text;
-  $("signin-error-link").textContent = text;
-  if (text) $("signin-errors").focus();
+  if (text) $("key-input").focus();
 }
-
-$("signin-error-link").addEventListener("click", (e) => {
-  e.preventDefault();
-  $("key-input").focus();
-});
 
 async function signIn(key, persist) {
   const user = await api("/whoami", { key });
@@ -244,7 +239,8 @@ function showApp() {
   $("signin").hidden = true;
   $("app").hidden = false;
   $("account").hidden = false;
-  $("who-name").textContent = "Signed in as " + state.user.user;
+  $("who-name").textContent = state.user.user;
+  $("who-avatar").textContent = initials(state.user.user);
   renderDatasets();
   renderHistory();
   resetView();
@@ -255,6 +251,31 @@ function showApp() {
   $("question").focus();
 }
 
+function initials(name) {
+  const parts = String(name).split(/[\s._-]+/).filter(Boolean);
+  return ((parts[0] || "?")[0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
+}
+
+// Small line icons, built as SVG elements (no HTML parsing).
+const ICONS = {
+  ga4: ["M3 17l4-5 3 3 4-6 3 4", "M3 3v14h14"],
+  marketing: ["M3 9v2l9 4V5L3 9z", "M12 7h2a3 3 0 0 1 0 6h-2", "M5 11.5l1 4.5h2l-.5-3.6"],
+  customers: ["M7 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M1.5 17a5.5 5.5 0 0 1 11 0", "M13 3.5a3 3 0 0 1 0 5.5", "M15 12.3a5.5 5.5 0 0 1 3.5 4.7"],
+  arrow: ["M4 10h12", "M11 5l5 5-5 5"],
+};
+
+function icon(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 20 20");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of ICONS[name] || ICONS.ga4) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+
 function renderDatasets() {
   const list = $("dataset-list");
   list.replaceChildren();
@@ -263,20 +284,29 @@ function renderDatasets() {
   for (const name of known) {
     const info = DATASETS[name];
     const card = document.createElement("section");
-    card.className = "dataset";
+    card.className = "card dataset";
+    const head = document.createElement("div");
+    head.className = "dataset-head";
+    const badge = document.createElement("span");
+    badge.className = "dataset-icon";
+    badge.append(icon(name));
     const h = document.createElement("h3");
-    h.className = "heading-s";
+    h.className = "dataset-title";
     h.textContent = info.title;
+    head.append(badge, h);
     const p = document.createElement("p");
-    p.className = "hint";
+    p.className = "dataset-about";
     p.textContent = info.about;
     const ul = document.createElement("ul");
+    ul.className = "examples";
     for (const q of info.examples) {
       const li = document.createElement("li");
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "link-button";
-      b.textContent = q;
+      b.className = "example";
+      const label = document.createElement("span");
+      label.textContent = q;
+      b.append(label, icon("arrow"));
       b.addEventListener("click", () => {
         $("question").value = q;
         updateCount();
@@ -285,7 +315,7 @@ function renderDatasets() {
       li.append(b);
       ul.append(li);
     }
-    card.append(h, p, ul);
+    card.append(head, p, ul);
     list.append(card);
   }
   if (unknown.length) {
@@ -309,14 +339,14 @@ function updateCount() {
   const left = QUESTION_MAX - $("question").value.length;
   const el = $("question-count");
   el.textContent = left >= 0
-    ? `You have ${left.toLocaleString(LOCALE)} character${left === 1 ? "" : "s"} remaining`
-    : `You have ${(-left).toLocaleString(LOCALE)} characters too many`;
+    ? `${left.toLocaleString(LOCALE)} character${left === 1 ? "" : "s"} left`
+    : `${(-left).toLocaleString(LOCALE)} characters too many`;
   el.classList.toggle("over", left < 0);
 }
 
 $("question").addEventListener("input", () => {
   updateCount();
-  if ($("question-group").classList.contains("form-group-error")) {
+  if ($("question-group").classList.contains("is-error")) {
     setFieldError("question-group", "question-error", $("question"), "");
   }
 });
@@ -331,12 +361,14 @@ function renderHistory() {
     const li = document.createElement("li");
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "link-button";
-    b.append(item.question);
+    b.className = "history-item";
+    const q = document.createElement("span");
+    q.className = "history-q";
+    q.textContent = item.question;
     const when = document.createElement("span");
-    when.className = "when";
+    when.className = "history-when";
     when.textContent = formatWhen(item.at);
-    b.append(when);
+    b.append(q, when);
     if (state.current && state.current.id === item.id) b.setAttribute("aria-current", "true");
     b.addEventListener("click", () => {
       if (state.controller) return;
@@ -494,8 +526,9 @@ function showAnswer(item) {
   $("start").hidden = true;
 
   const answered = r.status === "answered";
-  $("answer-banner").className = "banner" + (answered ? " banner-success" : "");
-  $("answer-status").textContent = answered ? "Answer" : "Partly answered: the data couldn't fully answer this";
+  $("answer-status").className = "pill " + (answered ? "pill-success" : "pill-warning");
+  $("answer-status").textContent = answered ? "Answered" : "Partial answer";
+  $("how-when-top").textContent = formatWhen(item.at);
   $("answer-question").textContent = item.question;
   $("answer-summary").textContent = r.summary;
 
@@ -510,14 +543,13 @@ function showAnswer(item) {
 
   const n = r.sql_used.length;
   $("how-count").textContent = n === 1 ? "1 query" : `${n} queries`;
-  $("how-bytes").textContent = formatBytes(r.bytes_processed);
+  $("how-bytes").textContent = formatBytes(r.bytes_processed, n);
   $("how-when").textContent = formatWhen(item.at);
   $("how-id").textContent = r.request_id;
   const sql = $("how-sql");
   sql.replaceChildren();
   r.sql_used.forEach((q, i) => {
     const h = document.createElement("h3");
-    h.className = "heading-s";
     h.textContent = n > 1 ? `Query ${i + 1}` : "Query";
     const pre = document.createElement("pre");
     pre.textContent = q;
@@ -533,7 +565,6 @@ function renderTable(chart) {
   const table = $("chart-table");
   table.replaceChildren();
   const cap = table.createCaption();
-  cap.className = "hint";
   cap.textContent = chart.title;
   const head = table.createTHead().insertRow();
   [chart.x_label, chart.y_label].forEach((h, i) => {
@@ -561,15 +592,15 @@ function renderTable(chart) {
 function palette(forExport) {
   if (forExport) {
     // Exported images always use the light palette so they suit slides and documents.
-    return { surface: "#ffffff", text: "#0b0c0c", muted: "#484949", grid: "#e6e8ea", series: "#2a78d6" };
+    return { surface: "#ffffff", text: "#101828", muted: "#667085", grid: "#eaecf0", series: "#2f6fd6" };
   }
   const css = getComputedStyle(document.documentElement);
   const v = (name) => css.getPropertyValue(name).trim();
-  return { surface: v("--chart-surface"), text: v("--text"), muted: v("--text-secondary"), grid: v("--chart-grid"), series: v("--chart-series") };
+  return { surface: v("--chart-surface"), text: v("--text"), muted: v("--muted"), grid: v("--chart-grid"), series: v("--chart-series") };
 }
 
 function chartOption(chart, p, { forExport = false } = {}) {
-  const font = { fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
+  const font = { fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" };
   const labels = chart.points.map((d) => d.label);
   const values = chart.points.map((d) => d.value);
   const axisText = { color: p.muted, fontSize: 12, ...font };
@@ -714,6 +745,8 @@ window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => state.chart && state.chart.resize(), 100);
 });
+// Canvas text uses whatever font is loaded at draw time; redraw once Inter is ready.
+if (document.fonts) document.fonts.ready.then(() => { if (state.chart) drawChart(); });
 // Redraw with the other palette when the system switches light/dark mode.
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if (state.chart) drawChart();
@@ -850,8 +883,9 @@ function formatWhen(iso) {
   return new Date(iso).toLocaleString(LOCALE, { dateStyle: "medium", timeStyle: "short" });
 }
 
-function formatBytes(n) {
-  if (!n) return "None: answered from the table descriptions";
+function formatBytes(n, queries) {
+  // BigQuery reads nothing when it reuses a cached result for an identical query.
+  if (!n) return queries ? "None: reused a recent result" : "None: answered from the table descriptions";
   const units = ["bytes", "KB", "MB", "GB", "TB"];
   let i = 0;
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
