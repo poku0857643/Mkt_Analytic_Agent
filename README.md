@@ -138,6 +138,7 @@ is enforced in code and covered by tests.
 | **Cost** | A BigQuery dry run must estimate under the byte limit before the real job runs; the job also sets `maximum_bytes_billed`. Each user has a daily scan budget, and a single query can't exceed what is left. | `app/guardrails.py`, `app/limits.py` |
 | **Least privilege** | The service account can read the allowed datasets and run jobs, nothing else. Even a query that got past the checks couldn't write. | [Google Cloud setup](#google-cloud-setup) |
 | **Agent limits** | 3 rejected queries per question, then the agent must explain; 12 turns max; 180 s timeout; 10 questions per user per minute. | `app/agent.py`, `app/api.py` |
+| **Misuse and distillation** | The Claude key never leaves the server and is never in the conversation, so the model can't reveal it. People can only send a question (the model, prompt, tools and limits are fixed). The assistant only answers questions about the data and declines anything else, including requests for its instructions or reasoning (`declined`). Per question: a model-visible task budget (40k tokens) and a hard 150k-token cap. Per person: one question at a time, 200 questions a day on every plan, and a pause until midnight UTC after 10 declined requests. Sign-in links to acceptable-use terms that forbid bulk harvesting and training models on answers. | `app/agent.py`, `app/api.py`, `app/static/terms.html` |
 | **Prompt injection** | The system prompt tells Claude that tool results are data, not instructions. The checks above hold even if the model is manipulated. | `app/agent.py` |
 | **Audit** | Every `/ask` request is logged, including denied and failed ones: user, role, question, each SQL attempt and its outcome, bytes, tokens, duration. Every Google sign-in is logged too (`signed_in`, `access_requested`, or `denied` with the reason). Never logged: API keys (denied requests keep an 8-character hash prefix), tokens, cookies and answer text. | `app/audit.py` |
 
@@ -302,8 +303,9 @@ curl -X POST http://127.0.0.1:8000/ask \
 }
 ```
 
-- `status` is `answered`, or `limitation` when the data or the security rules didn't
-  allow a full answer. The summary then explains why, for example "phone numbers are
+- `status` is `answered`; `limitation` when the data or the security rules didn't
+  allow a full answer; or `declined` when the request wasn't a question about the data
+  (the assistant only answers those). The summary then explains why, for example "phone numbers are
   restricted PII".
 - `chart` is `null` when a chart wouldn't help.
 - `sql_used` lists only queries that ran. Rejected attempts are in the audit log.
@@ -316,7 +318,7 @@ curl -X POST http://127.0.0.1:8000/ask \
 | 403 | The key's role has no datasets |
 | 422 | Invalid request body |
 | 402 | A plan limit is used up (trial, included usage, or spending cap); `detail` explains |
-| 429 | Rate limit (see `Retry-After`) or daily scan budget reached |
+| 429 | Rate limit (see `Retry-After`), a question already running, the daily question limit, a pause after repeated declined requests, or the daily scan budget; `detail` explains |
 | 502 | The Anthropic API is unavailable |
 | 504 | The question took longer than `ASK_TIMEOUT_SECONDS` |
 | 500 | Anything else (details only in the audit log) |
@@ -418,6 +420,11 @@ values must be valid JSON.
 | `AGENT_EFFORT` | `high` | `low` / `medium` / `high` / `xhigh` / `max`. Lower is faster and cheaper. |
 | `AGENT_MAX_QUERY_RETRIES` | `3` | Rejected queries allowed before the agent must explain instead |
 | `AGENT_MAX_TURNS` | `12` | Max model turns per question |
+| `AGENT_MAX_TOKENS_PER_QUESTION` | `150000` | Hard token cap per question (input incl. cache + output); stops runaway questions |
+| `AGENT_TASK_BUDGET_TOKENS` | `40000` | Model-visible token budget per question (beta; min 20,000). Unset to turn off. |
+| `ASK_MAX_CONCURRENT_PER_USER` | `1` | Questions one person may have running at once |
+| `ASK_DAILY_QUESTION_LIMIT` | `200` | Questions per person per UTC day, on every plan (unset for none) |
+| `DECLINED_DAILY_LIMIT` | `10` | Declined (out-of-scope) requests per person per day before questions pause until midnight UTC |
 | `MAX_BYTES_BILLED` | `1073741824` (1 GiB) | Max bytes a single query may scan |
 | `MAX_RESULT_ROWS` | `500` | Rows returned to the agent per query |
 | `QUERY_TIMEOUT_SECONDS` | `60` | BigQuery query timeout |
@@ -635,6 +642,11 @@ Each feature was built on its own branch, each based on the previous one:
   (Cloud SQL, Firestore). Limits are checked before a question runs, so one question
   in flight can take usage slightly past a cap. A question that fails mid-way is
   metered for its BigQuery bytes but not the Claude tokens it used.
+- **Distillation can be made hard, not impossible.** Scope limits, volume caps,
+  per-network trial caps and the terms stop casual and scripted harvesting, and the
+  audit log shows who asks what. Someone with many enrolled accounts on many networks
+  could still collect answers slowly; review heavy users on the admin usage page.
+  The concurrency limit, like the rate limit, is per server instance.
 - **No payments.** Plans, prices and usage are tracked, but nobody is charged; a
   billing provider would need to be connected.
 - **Access requests aren't notified.** A person waiting for access shows up as an

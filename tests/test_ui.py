@@ -77,3 +77,12 @@ def test_charts_never_render_tooltips_as_html(client):
     js = client.get("/static/app.js").text
     # ECharts tooltips default to HTML; richText draws them on the canvas instead.
     assert 'renderMode: "richText"' in js
+
+
+def test_acceptable_use_page_is_linked_from_sign_in(client):
+    html = client.get("/").text
+    assert 'href="/static/terms.html"' in html
+    terms = client.get("/static/terms.html")
+    assert terms.status_code == 200
+    assert "train, fine-tune, distil" in terms.text
+    assert "content-security-policy" in terms.headers

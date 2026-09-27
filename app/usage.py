@@ -216,6 +216,11 @@ class UsageStore:
         )
         return r[0], r[1]
 
+    def day_status_count(self, user: str, day: str, status: str) -> int:
+        return self._one(
+            "SELECT COUNT(*) FROM usage WHERE user = ? AND day = ? AND status = ?", user, day, status
+        )[0]
+
     def ip_trial_questions(self, ip: str, day: str) -> int:
         return self._one(
             "SELECT COUNT(*) FROM usage WHERE ip = ? AND day = ? AND plan = 'freemium'", ip, day

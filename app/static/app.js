@@ -555,11 +555,17 @@ function askErrorText(err) {
       return ["You don't have access to any data", "Your key hasn't been given access to any data. Ask your admin to set this up.", false];
     case 422:
       return ["Your question wasn't accepted", "Questions need to be between 3 and 2,000 characters.", false];
-    case 429:
+    case 429: {
       if (err.retryAfter) {
         return ["You're asking questions too quickly", `You've asked several questions in the last minute. Wait about ${err.retryAfter} seconds, then try again.`, true];
       }
-      return ["You've reached today's data limit", "You've used today's allowance for reading data. It resets at midnight UTC. If you need more, ask your admin.", false];
+      // The server's message says which limit; pick a title to match.
+      const d = err.detail || "";
+      if (d.includes("already have a question running")) return ["A question is already running", d, true];
+      if (d.includes("paused")) return ["Questions are paused for today", d, false];
+      if (d.includes("daily maximum")) return ["You've reached today's question limit", d, false, true];
+      return ["You've reached today's data limit", d || "You've used today's allowance for reading data. It resets at midnight UTC.", false];
+    }
     case 502:
       return ["The assistant is busy", "The AI service is temporarily unavailable. Try again in a minute or two.", true];
     case 504:
@@ -594,8 +600,9 @@ function showAnswer(item) {
   $("start").hidden = true;
 
   const answered = r.status === "answered";
-  $("answer-status").className = "pill " + (answered ? "pill-success" : "pill-warning");
-  $("answer-status").textContent = answered ? "Answered" : "Partial answer";
+  const declined = r.status === "declined";
+  $("answer-status").className = "pill " + (answered ? "pill-success" : declined ? "pill-info" : "pill-warning");
+  $("answer-status").textContent = answered ? "Answered" : declined ? "Not a data question" : "Partial answer";
   $("how-when-top").textContent = formatWhen(item.at);
   $("answer-question").textContent = item.question;
   $("answer-summary").textContent = r.summary;
@@ -1210,7 +1217,7 @@ function renderDailyTable(report) {
 }
 
 const STATUS_LABELS = {
-  answered: "Answered", limitation: "Partial answer", error: "Failed",
+  answered: "Answered", limitation: "Partial answer", declined: "Not a data question", error: "Failed",
 };
 
 function renderRecent(report) {

@@ -192,9 +192,10 @@ def test_disallowed_dataset_in_tool_is_error_but_not_a_query_rejection():
     assert result.queries == []
 
 
-def test_refusal_returns_limitation():
+def test_refusal_is_declined():
+    # Counted with out-of-scope requests toward the daily "declined" pause.
     result, _, _ = run([reply("refusal")])
-    assert result.answer.status == "limitation"
+    assert result.answer.status == "declined"
     assert "declined" in result.answer.summary
 
 

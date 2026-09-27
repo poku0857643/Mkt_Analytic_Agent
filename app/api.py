@@ -20,7 +20,7 @@ from app.auth import User, api_key_header, get_current_user, hash_key
 from app.bigquery_tools import BigQueryTools
 from app.config import Settings, get_settings
 from app.google_auth import router as google_auth_router
-from app.limits import DailyScanBudget, RateLimiter
+from app.limits import DailyScanBudget, InFlightLimiter, RateLimiter
 from app.mcp_server import build_server
 from app.usage import (
     PLAN_NAMES,
@@ -94,6 +94,15 @@ def _rate_limiter(limit: int) -> RateLimiter:
 
 def get_rate_limiter(settings: Annotated[Settings, Depends(get_settings)]) -> RateLimiter:
     return _rate_limiter(settings.ask_rate_limit_per_minute)
+
+
+@lru_cache
+def _inflight_limiter(limit: int) -> InFlightLimiter:
+    return InFlightLimiter(limit)
+
+
+def get_inflight_limiter(settings: Annotated[Settings, Depends(get_settings)]) -> InFlightLimiter:
+    return _inflight_limiter(settings.ask_max_concurrent_per_user)
 
 
 @lru_cache
@@ -221,6 +230,7 @@ async def ask(
     limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     budget: Annotated[DailyScanBudget, Depends(get_scan_budget)],
     usage: Annotated[UsageStore, Depends(get_usage_store)],
+    inflight: Annotated[InFlightLimiter, Depends(get_inflight_limiter)],
     request: Request,
 ) -> AskResponse:
     started = time.monotonic()
@@ -242,6 +252,28 @@ async def ask(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "Too many questions. Please wait a moment.",
             headers={"Retry-After": str(math.ceil(retry_after))},
+        )
+
+    # Anti-abuse and anti-distillation: cap daily volume on every plan, and pause
+    # people who keep sending out-of-scope requests (probing, prompt extraction).
+    today = utc_now().date().isoformat()
+    if settings.ask_daily_question_limit is not None and (
+        usage.day_totals(user.user, today)[0] >= settings.ask_daily_question_limit
+    ):
+        record.outcome, record.http_status = "daily_limit", status.HTTP_429_TOO_MANY_REQUESTS
+        audit.write(record)
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"You've asked {settings.ask_daily_question_limit} questions today, the daily maximum. "
+            "It resets at midnight UTC.",
+        )
+    if usage.day_status_count(user.user, today, "declined") >= settings.declined_daily_limit:
+        record.outcome, record.http_status = "paused", status.HTTP_429_TOO_MANY_REQUESTS
+        audit.write(record)
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Questions are paused until midnight UTC: too many requests today were outside what "
+            "this assistant covers. It only answers questions about the marketing data.",
         )
 
     try:
@@ -272,6 +304,15 @@ async def ask(
         timeout=settings.query_timeout_seconds,
     )
 
+    if not inflight.try_acquire(user.user):
+        record.outcome, record.http_status = "rate_limited", status.HTTP_429_TOO_MANY_REQUESTS
+        record.error = "question already running"
+        audit.write(record)
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "You already have a question running. Wait for it to finish, then ask again.",
+        )
+
     result: AgentResult | None = None
     try:
         async with asyncio.timeout(settings.ask_timeout_seconds):
@@ -298,12 +339,15 @@ async def ask(
         record.outcome = result.answer.status
         record.http_status = status.HTTP_200_OK
     finally:
-        # Charge every byte scanned, including queries run before a failure.
-        budget.add(user.user, tools.bytes_processed)
-        record.total_bytes_processed = tools.bytes_processed
-        record.duration_ms = int((time.monotonic() - started) * 1000)
-        audit.write(record)
-        _meter(usage, settings, user, ip, body.question, record, result)
+        try:
+            # Charge every byte scanned, including queries run before a failure.
+            budget.add(user.user, tools.bytes_processed)
+            record.total_bytes_processed = tools.bytes_processed
+            record.duration_ms = int((time.monotonic() - started) * 1000)
+            audit.write(record)
+            _meter(usage, settings, user, ip, body.question, record, result)
+        finally:
+            inflight.release(user.user)
 
     return AskResponse(
         request_id=record.request_id,

@@ -125,9 +125,26 @@ class Settings(BaseSettings):
     # Hard cap on model turns per question.
     agent_max_turns: int = 12
 
+    # Hard cap on tokens per question (input incl. cache + output); the question
+    # stops with a "narrower question" message past it. Measured questions use
+    # 10-19k, so 150k only stops runaway ones (~$1 worst case at list prices).
+    agent_max_tokens_per_question: int | None = 150_000
+    # Model-visible task budget (beta, min 20,000): Claude paces itself to finish
+    # within it. Unset to turn off.
+    agent_task_budget_tokens: int | None = 40_000
+
     # Per-user limits on /ask (in memory, per server instance).
     ask_rate_limit_per_minute: int = 10
     user_daily_bytes_limit: int = 10 * 1024**3
+
+    # Questions one person may have running at once (per server instance).
+    ask_max_concurrent_per_user: int = 1
+    # Questions per person per UTC day, on every plan. Distilling a model needs
+    # volume; normal use is far below this.
+    ask_daily_question_limit: int | None = 200
+    # Out-of-scope requests per person per day before their questions are paused
+    # until midnight UTC (probing, prompt extraction, bulk off-topic use).
+    declined_daily_limit: int = 10
 
     # Seconds before /ask gives up and returns 504.
     ask_timeout_seconds: float = 180.0
