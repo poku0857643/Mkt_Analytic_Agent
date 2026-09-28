@@ -185,7 +185,8 @@ analytics) and/or [seed the sandbox datasets](#sandbox-data).
 
 For people who don't use the command line, the API serves a browser app at `/`,
 with a public intro page at `/welcome` (what it does, how it works, answer types,
-security, a pricing pointer and FAQ). A browser that isn't signed in is shown the
+an ERRC grid comparing it with the usual ways teams get answers, security, a pricing
+pointer and FAQ). A browser that isn't signed in is shown the
 intro once; shared question links and returns from sign-in never are. Give
 people the site's address; nothing needs installing, and nobody handles a key or
 password for this app.
@@ -219,7 +220,8 @@ per-minute limit with a wait time, the daily data allowance, or a timeout with a
 to narrow the question.
 
 The look is a calm, product-style design: the Inter typeface, a neutral palette with
-one blue accent, hairline borders, rounded inputs with focus rings and custom
+one blue accent and its complement, orange, as a highlight colour for emphasis only
+(never status; validated with the blue for contrast and colour-blind separation), hairline borders, rounded inputs with focus rings and custom
 checkboxes, with light and dark themes. Text and controls meet WCAG AA contrast
 (4.5:1 for text, 3:1 for input borders), errors appear under the field they belong
 to, and focus is always visible. Charts use [Apache ECharts](https://echarts.apache.org/)
@@ -666,7 +668,7 @@ Each feature was built on its own branch, each based on the previous one:
 → `feature/ask-endpoint` → `feature/hardening` → `feature/web-ui` →
 `feature/ui-restyle` → `feature/google-sign-in` → `feature/plans-and-usage` →
 `feature/abuse-protection` → `feature/plan-management` → `feature/analysis-reports` →
-`feature/pricing-page` → `feature/intro-page`.
+`feature/pricing-page` → `feature/intro-page` → `feature/errc-highlight`.
 
 ## Known limitations
 
