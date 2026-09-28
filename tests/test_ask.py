@@ -292,3 +292,12 @@ def test_timeout_is_504_and_charges_bytes_already_scanned(h, settings):
     assert record.http_status == 504
     assert record.total_bytes_processed == 12_345
     assert h.budget.remaining("ana") == 10**9 - 12_345
+
+
+def test_report_reaches_the_caller(h):
+    from tests.test_agent import REPORT_ANSWER
+
+    h.script(query(GOOD_SQL, "t1"), final(REPORT_ANSWER))
+    body = h.ask().json()
+    assert body["report"]["recommendations"][0]["impact"] == "high"
+    assert body["report"]["drivers"][1]["confidence"] == "hypothesis"

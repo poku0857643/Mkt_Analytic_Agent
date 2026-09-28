@@ -111,3 +111,21 @@ def test_data_question_still_answered_under_the_task_budget():
     assert result.answer.status == "answered"
     assert "referral" in result.answer.summary.lower()
     assert result.total_tokens < 150_000
+
+
+def test_analysis_request_returns_a_grounded_report():
+    result = ask(
+        "According to the conversion rate on mobile compared with desktop, write a report with "
+        "feedback, strategies to improve and potential optimisations.",
+        datasets=("ga4",),
+        **LIMITS,
+    )
+    assert result.answer.status == "answered"
+    report = result.answer.report
+    assert report is not None
+    assert len(report.findings) >= 3
+    assert len(report.recommendations) >= 3
+    assert all(r.measure for r in report.recommendations)
+    # It measured before concluding: the headline comparison plus breakdowns.
+    assert len(result.sql_used) >= 2
+    print(f"\nturns={result.turns} tokens={result.total_tokens} queries={len(result.sql_used)}")

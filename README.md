@@ -319,6 +319,14 @@ curl -X POST http://127.0.0.1:8000/ask \
 }
 ```
 
+- `report` is `null` for lookups. For analysis requests (why, what to do, a report,
+  feedback, strategies, optimisation) the agent measures the headline figure, breaks
+  it down (funnel, channel, device, landing page, new vs returning…), checks its own
+  conclusions (volumes, mix effects, what the data can't show), and returns
+  `findings`, `drivers` (each marked `supported`, `likely` or `hypothesis`, with
+  evidence or the data that would test it), `recommendations` (impact, effort and how
+  to measure success) and `caveats`. The web app shows it as a report that can be
+  copied or printed / saved as PDF.
 - `status` is `answered`; `limitation` when the data or the security rules didn't
   allow a full answer; or `declined` when the request wasn't a question about the data
   (the assistant only answers those). The summary then explains why, for example "phone numbers are
@@ -437,7 +445,7 @@ values must be valid JSON.
 | `AGENT_MODEL` | `claude-opus-5` | Claude model for the agent |
 | `AGENT_EFFORT` | `high` | `low` / `medium` / `high` / `xhigh` / `max`. Lower is faster and cheaper. |
 | `AGENT_MAX_QUERY_RETRIES` | `3` | Rejected queries allowed before the agent must explain instead |
-| `AGENT_MAX_TURNS` | `12` | Max model turns per question |
+| `AGENT_MAX_TURNS` | `16` | Max model turns per question (reports need more than lookups) |
 | `AGENT_MAX_TOKENS_PER_QUESTION` | `150000` | Hard token cap per question (input incl. cache + output); stops runaway questions |
 | `AGENT_TASK_BUDGET_TOKENS` | `40000` | Model-visible token budget per question (beta; min 20,000). Unset to turn off. |
 | `ASK_MAX_CONCURRENT_PER_USER` | `1` | Questions one person may have running at once |
@@ -448,7 +456,7 @@ values must be valid JSON.
 | `QUERY_TIMEOUT_SECONDS` | `60` | BigQuery query timeout |
 | `ASK_RATE_LIMIT_PER_MINUTE` | `10` | Questions per user per rolling minute |
 | `USER_DAILY_BYTES_LIMIT` | `10737418240` (10 GiB) | BigQuery bytes per user per UTC day |
-| `ASK_TIMEOUT_SECONDS` | `180` | `/ask` timeout |
+| `ASK_TIMEOUT_SECONDS` | `300` | `/ask` timeout |
 | `AUDIT_LOG_PATH` | `logs/audit.jsonl` | Audit log file, or `-` for stdout (the Docker image sets `-`) |
 | `MCP_ALLOWED_DATASETS` | `[]` | Datasets for the command-line agent and standalone MCP server only |
 
@@ -649,8 +657,10 @@ Each feature was built on its own branch, each based on the previous one:
 - **PII checks are strict.** Any reference to a PII column is rejected, even
   `COUNTIF(phone IS NOT NULL)` or `SELECT * EXCEPT(email)`. A column in another table
   with the same name as a PII column is also blocked when both tables are in the query.
-- **Latency and cost.** A question takes about 15–30 s and roughly 3–5¢ with
-  `claude-opus-5` at effort `high`. Lower `AGENT_EFFORT` for faster, cheaper answers.
+- **Latency and cost** (measured with `claude-opus-5` at effort `high`): a lookup
+  takes 15–30 s, about 4 turns and 10–19k tokens (~6¢); an analysis report takes about
+  2 minutes, 8 turns, 8–9 queries and ~75–80k tokens (~32¢). Lower `AGENT_EFFORT` for
+  faster, cheaper answers, and size plan allowances with reports in mind.
 - **Access lists are managed by hand** in `USER_ROLES` (and `API_KEYS` for scripts).
   Google Groups aren't read; use a Workspace domain entry or list people. When
   deploying to Cloud Run, Identity-Aware Proxy can be added in front for defense in

@@ -50,7 +50,7 @@ const STEPS = [
   [4, "Finding the right data…"],
   [12, "Running the numbers…"],
   [30, "Checking the results…"],
-  [60, "Still working. Bigger questions take longer…"],
+  [60, "Still working. Reports with several breakdowns take longer…"],
   [120, "Nearly at the time limit. Hang on…"],
 ];
 
@@ -608,6 +608,8 @@ function showAnswer(item) {
   $("answer-question").textContent = item.question;
   $("answer-summary").textContent = r.summary;
 
+  renderReport(r.report || null);
+
   const chart = hasChart(r) ? r.chart : null;
   $("chart-wrap").hidden = !chart;
   $("dl-csv").hidden = !chart;
@@ -636,6 +638,87 @@ function showAnswer(item) {
   drawChart();
   $("answer").focus();
 }
+
+// ---------- analysis report ----------
+
+const CONFIDENCE = {
+  supported: ["Supported by data", "tag-supported"],
+  likely: ["Likely", "tag-likely"],
+  hypothesis: ["Hypothesis", "tag-hypothesis"],
+};
+const LEVEL = { high: "High", medium: "Medium", low: "Low" };
+
+function tag(text, cls) {
+  const t = document.createElement("span");
+  t.className = "tag " + cls;
+  t.textContent = text;
+  return t;
+}
+
+function itemTitle(text, ...tags) {
+  const div = document.createElement("div");
+  div.className = "item-title";
+  const span = document.createElement("span");
+  span.textContent = text;
+  div.append(span, ...tags);
+  return div;
+}
+
+function itemMeta(label, text) {
+  const meta = document.createElement("span");
+  meta.className = "item-meta";
+  const strong = document.createElement("strong");
+  strong.textContent = label + ": ";
+  meta.append(strong, text);
+  return meta;
+}
+
+function renderReport(report) {
+  $("report").hidden = !report;
+  $("print-report").hidden = !report;
+  if (!report) return;
+
+  const findings = $("report-findings");
+  findings.replaceChildren();
+  for (const f of report.findings) {
+    const li = document.createElement("li");
+    li.append(itemTitle(f.title), f.detail);
+    findings.append(li);
+  }
+
+  const drivers = $("report-drivers");
+  drivers.replaceChildren();
+  for (const d of report.drivers) {
+    const [label, cls] = CONFIDENCE[d.confidence] || [d.confidence, "tag-neutral"];
+    const li = document.createElement("li");
+    li.append(itemTitle(d.title, tag(label, cls)), d.explanation);
+    if (d.evidence) li.append(itemMeta(d.confidence === "hypothesis" ? "To test this" : "Evidence", d.evidence));
+    drivers.append(li);
+  }
+
+  const recs = $("report-recs");
+  recs.replaceChildren();
+  for (const r of report.recommendations) {
+    const li = document.createElement("li");
+    li.append(
+      itemTitle(r.action, tag(`Impact: ${LEVEL[r.impact] || r.impact}`, "tag-neutral"), tag(`Effort: ${LEVEL[r.effort] || r.effort}`, "tag-neutral")),
+      r.rationale,
+      itemMeta("How to measure", r.measure),
+    );
+    recs.append(li);
+  }
+
+  $("report-caveats-block").hidden = report.caveats.length === 0;
+  const caveats = $("report-caveats");
+  caveats.replaceChildren();
+  for (const c of report.caveats) {
+    const li = document.createElement("li");
+    li.textContent = c;
+    caveats.append(li);
+  }
+}
+
+$("print-report").addEventListener("click", () => window.print());
 
 function renderTable(chart) {
   const table = $("chart-table");
@@ -881,6 +964,25 @@ async function copyText(text) {
 function answerAsText(item) {
   const r = item.response;
   const lines = [item.question, "", r.summary];
+  if (r.report) {
+    const rep = r.report;
+    lines.push("", "KEY FINDINGS");
+    rep.findings.forEach((f, i) => lines.push(`${i + 1}. ${f.title}: ${f.detail}`));
+    lines.push("", "WHY IT'S HAPPENING");
+    for (const d of rep.drivers) {
+      lines.push(`- ${d.title} [${(CONFIDENCE[d.confidence] || [d.confidence])[0]}]: ${d.explanation}`);
+      if (d.evidence) lines.push(`  ${d.confidence === "hypothesis" ? "To test this" : "Evidence"}: ${d.evidence}`);
+    }
+    lines.push("", "RECOMMENDATIONS");
+    rep.recommendations.forEach((x, i) => {
+      lines.push(`${i + 1}. ${x.action} (impact: ${x.impact}, effort: ${x.effort})`);
+      lines.push(`   Why: ${x.rationale}`, `   How to measure: ${x.measure}`);
+    });
+    if (rep.caveats.length) {
+      lines.push("", "CAVEATS");
+      for (const c of rep.caveats) lines.push(`- ${c}`);
+    }
+  }
   if (hasChart(r)) {
     lines.push("", r.chart.title);
     for (const p of r.chart.points) lines.push(`- ${p.label}: ${formatNumber(p.value)}`);

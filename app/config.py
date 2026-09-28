@@ -122,12 +122,14 @@ class Settings(BaseSettings):
     # Rejected execute_query calls allowed before the agent must explain instead.
     agent_max_query_retries: int = 3
 
-    # Hard cap on model turns per question.
-    agent_max_turns: int = 12
+    # Hard cap on model turns per question. Analysis requests (reports) run
+    # several breakdown queries, so they need more turns than lookups.
+    agent_max_turns: int = 16
 
     # Hard cap on tokens per question (input incl. cache + output); the question
-    # stops with a "narrower question" message past it. Measured questions use
-    # 10-19k, so 150k only stops runaway ones (~$1 worst case at list prices).
+    # stops with a "narrower question" message past it. Measured: lookups use
+    # 10-19k, analysis reports ~75-80k, so 150k only stops runaway questions
+    # (~$1 worst case at list prices).
     agent_max_tokens_per_question: int | None = 150_000
     # Model-visible task budget (beta, min 20,000): Claude paces itself to finish
     # within it. Unset to turn off.
@@ -147,7 +149,7 @@ class Settings(BaseSettings):
     declined_daily_limit: int = 10
 
     # Seconds before /ask gives up and returns 504.
-    ask_timeout_seconds: float = 180.0
+    ask_timeout_seconds: float = 300.0
 
     # Where /ask audit records go: a JSON-lines file, or "-" for stdout (Cloud Run).
     audit_log_path: str = "logs/audit.jsonl"
