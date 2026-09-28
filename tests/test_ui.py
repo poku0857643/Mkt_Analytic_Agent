@@ -48,8 +48,9 @@ def test_index_has_no_inline_or_external_code(client):
     assert not re.search(r"(src|href)=\"https?://", html)
 
 
-def test_ui_never_renders_server_text_as_html(client):
-    js = client.get("/static/app.js").text
+@pytest.mark.parametrize("script", ["app.js", "plans.js", "plans-page.js"])
+def test_ui_never_renders_server_text_as_html(client, script):
+    js = client.get(f"/static/{script}").text
     assert "innerHTML" not in js
     assert "insertAdjacentHTML" not in js
 
