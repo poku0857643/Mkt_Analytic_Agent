@@ -50,6 +50,14 @@
   --radius: 10px;
   --radius-lg: 14px;
 
+  /* Highlight: orange, the complement of the blue accent, for emphasis only
+     (never status). Fill validated with the blue for contrast and colour-blind
+     separation; text and marker pairs meet WCAG AA. */
+  --highlight: #ea580c;
+  --highlight-text: #c2410c;
+  --highlight-soft: #fff1e8;
+  --highlight-marker: #ffd8c2;
+
   /* Chart: single series hue, validated against the chart surface. */
   --chart-series: #2f6fd6;
   --chart-grid: #eaecf0;
@@ -88,6 +96,10 @@
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 8px 24px -6px rgba(0, 0, 0, 0.5);
+    --highlight: #ec6424;
+    --highlight-text: #ff8a4c;
+    --highlight-soft: #3a2012;
+    --highlight-marker: #6b2c10;
     --chart-series: #4a8cf0;
     --chart-grid: #1f242f;
     --chart-surface: #161b26;
@@ -894,3 +906,49 @@ a.btn { text-decoration: none; }
 .intro-cta { padding: 80px 0; text-align: center; background: radial-gradient(700px 300px at 50% 120%, var(--accent-soft), transparent 70%), var(--bg); }
 .cta-inner { display: flex; flex-direction: column; align-items: center; }
 .cta-inner .intro-lede { margin-bottom: 22px; }
+
+/* ---------- highlight colour ---------- */
+mark.hl {
+  background: linear-gradient(transparent 58%, var(--highlight-marker) 58%, var(--highlight-marker) 92%, transparent 92%);
+  color: inherit;
+  padding: 0 0.06em;
+}
+.eyebrow-highlight { color: var(--highlight-text); }
+
+/* ---------- ERRC grid ---------- */
+.errc-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.8125rem; color: var(--muted); margin: -12px 0 24px; }
+.errc-legend span { display: inline-flex; align-items: center; gap: 8px; }
+.errc-legend .swatch { width: 12px; height: 12px; border-radius: 3px; background: var(--border); }
+.errc-legend .swatch.hot { background: var(--highlight); }
+.errc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 900px) { .errc-grid { grid-template-columns: minmax(0, 1fr); } }
+.errc { padding: 22px 24px; border-top: 4px solid var(--border); }
+.errc.hot { border-top-color: var(--highlight); }
+.errc-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.errc-letter {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 1.125rem;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  border: 1px solid var(--hairline);
+}
+.errc.hot .errc-letter { background: var(--highlight-soft); color: var(--highlight-text); border-color: transparent; }
+.errc-head h3 { margin: 0; font-size: 1.125rem; }
+.errc-head p { margin: 0; font-size: 0.8125rem; color: var(--muted); }
+.errc-list { list-style: none; margin: 0; padding: 0; }
+.errc-list li { padding: 12px 0; border-top: 1px solid var(--hairline); }
+.errc-what { font-weight: 600; color: var(--text); margin-bottom: 6px; font-size: 0.9375rem; }
+.errc-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; font-size: 0.875rem; line-height: 1.5; }
+.errc-row + .errc-row { margin-top: 4px; }
+.errc-tag { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding-top: 2px; }
+.errc-typical { color: var(--muted); }
+.errc-typical .errc-tag { color: var(--muted); }
+.errc-ours { color: var(--text-secondary); }
+.errc-ours .errc-tag { color: var(--accent); }
+.errc.hot .errc-ours .errc-tag { color: var(--highlight-text); }
