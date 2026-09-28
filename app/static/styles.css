@@ -983,3 +983,6 @@ mark.hl {
 .dataset-icon.fw-icon svg { stroke: var(--highlight-text); }
 .kind-frameworks { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 0.9375rem; }
 .kind-frameworks strong { color: var(--highlight-text); font-weight: 600; }
+.errc-letter svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.errc.hot .errc-letter svg { stroke: var(--highlight-text); }
+.errc-footnote { margin-top: 16px; font-size: 0.8125rem; color: var(--muted); }

@@ -185,8 +185,9 @@ analytics) and/or [seed the sandbox datasets](#sandbox-data).
 
 For people who don't use the command line, the API serves a browser app at `/`,
 with a public intro page at `/welcome` (what it does, how it works, answer types,
-an ERRC grid comparing it with the usual ways teams get answers, security, a pricing
-pointer and FAQ). A browser that isn't signed in is shown the
+"What changes for your team" (an ERRC grid in everyday words: No more…, Less…,
+More…, New…, each item a Before / Now pair against the usual ways teams get answers),
+security, a pricing pointer and FAQ). A browser that isn't signed in is shown the
 intro once; shared question links and returns from sign-in never are. Give
 people the site's address; nothing needs installing, and nobody handles a key or
 password for this app.
@@ -686,7 +687,7 @@ Each feature was built on its own branch, each based on the previous one:
 `feature/ui-restyle` → `feature/google-sign-in` → `feature/plans-and-usage` →
 `feature/abuse-protection` → `feature/plan-management` → `feature/analysis-reports` →
 `feature/pricing-page` → `feature/intro-page` → `feature/errc-highlight` →
-`feature/analysis-frameworks`.
+`feature/analysis-frameworks` → `feature/intro-plain-language`.
 
 ## Known limitations
 

@@ -28,12 +28,16 @@ def test_intro_example_uses_real_sample_figures(client):
     assert "Google Merchandise Store sample data" in html
 
 
-def test_errc_grid_compares_with_the_usual_approach(client):
+def test_what_changes_grid_uses_everyday_words(client):
     html = client.get("/welcome").text
-    for quadrant in ("Eliminate", "Reduce", "Raise", "Create"):
+    # ERRC quadrants, named in plain language.
+    for quadrant in ("No more…", "Less…", "More…", "New…"):
         assert f">{quadrant}</h3>" in html
-    # Every item pairs the usual approach with ours.
-    assert html.count('class="errc-row errc-typical"') == html.count('class="errc-row errc-ours"') == 12
+    for jargon in (">Eliminate</h3>", ">Typical<", ">Ours<", 'class="errc-letter" aria-hidden="true">E<'):
+        assert jargon not in html
+    # Every item pairs how it was before with how it is now.
+    assert html.count('class="errc-row errc-typical"') == html.count('class="errc-row errc-ours"') == 13
+    assert html.count(">Before<") == html.count(">Now<") == 13
     # Raise and Create carry the highlight colour; Eliminate and Reduce don't.
     assert html.count('class="card errc hot"') == 2
 
