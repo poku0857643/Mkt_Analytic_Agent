@@ -657,8 +657,10 @@ Each feature was built on its own branch, each based on the previous one:
 - **PII checks are strict.** Any reference to a PII column is rejected, even
   `COUNTIF(phone IS NOT NULL)` or `SELECT * EXCEPT(email)`. A column in another table
   with the same name as a PII column is also blocked when both tables are in the query.
-- **Latency and cost.** A question takes about 15–30 s and roughly 3–5¢ with
-  `claude-opus-5` at effort `high`. Lower `AGENT_EFFORT` for faster, cheaper answers.
+- **Latency and cost** (measured with `claude-opus-5` at effort `high`): a lookup
+  takes 15–30 s, about 4 turns and 10–19k tokens (~6¢); an analysis report takes about
+  2 minutes, 8 turns, 8–9 queries and ~75–80k tokens (~32¢). Lower `AGENT_EFFORT` for
+  faster, cheaper answers, and size plan allowances with reports in mind.
 - **Access lists are managed by hand** in `USER_ROLES` (and `API_KEYS` for scripts).
   Google Groups aren't read; use a Workspace domain entry or list people. When
   deploying to Cloud Run, Identity-Aware Proxy can be added in front for defense in

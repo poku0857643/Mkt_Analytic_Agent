@@ -127,8 +127,9 @@ class Settings(BaseSettings):
     agent_max_turns: int = 16
 
     # Hard cap on tokens per question (input incl. cache + output); the question
-    # stops with a "narrower question" message past it. Measured questions use
-    # 10-19k, so 150k only stops runaway ones (~$1 worst case at list prices).
+    # stops with a "narrower question" message past it. Measured: lookups use
+    # 10-19k, analysis reports ~75-80k, so 150k only stops runaway questions
+    # (~$1 worst case at list prices).
     agent_max_tokens_per_question: int | None = 150_000
     # Model-visible task budget (beta, min 20,000): Claude paces itself to finish
     # within it. Unset to turn off.
