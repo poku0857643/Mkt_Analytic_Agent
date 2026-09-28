@@ -720,3 +720,23 @@ code, kbd, pre { font-family: var(--mono); font-size: 0.85em; }
 .legal-card strong { color: var(--text); font-weight: 600; }
 .legal > .muted { margin-top: 24px; }
 .foot a, .footer a { color: inherit; }
+
+/* ---------- plan management ---------- */
+.plan-card { align-items: center; }
+.plan-main { min-width: 0; }
+.plan-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 2px; }
+.plan-main #plan-period { margin-top: 6px; }
+.plan-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn-danger-ghost { background: transparent; color: var(--error); }
+.btn-danger-ghost:hover:not(:disabled) { background: var(--error-soft); }
+.confirm { padding: 16px 20px; border-color: var(--border); }
+.confirm-title { font-weight: 600; margin-bottom: 4px; }
+.confirm .muted { font-size: 0.9375rem; }
+.confirm-actions { display: flex; gap: 8px; margin-top: 14px; }
+.usage .toast { margin-top: 0; }
+.plan-option-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 640px) { .plan-option-grid { grid-template-columns: 1fr; } }
+.plan-option { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.plan-option h3 { font-size: 1rem; font-weight: 600; }
+.plan-option p { color: var(--text-secondary); font-size: 0.875rem; flex: 1; }
+.plan-option .btn { align-self: flex-start; }

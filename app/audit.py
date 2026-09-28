@@ -23,6 +23,8 @@ from app.config import Settings, get_settings
 Outcome = Literal[
     "answered", "limitation", "declined", "denied", "rate_limited", "over_budget", "plan_limit",
     "daily_limit", "paused", "error",
+    # Plan events: someone switched, cancelled or resumed their plan.
+    "plan_changed",
     # Sign-in events: signed in with a role, or signed in and waiting for one.
     "signed_in", "access_requested",
 ]
@@ -41,7 +43,7 @@ class AuditRecord:
     request_id: str
     outcome: Outcome
     http_status: int
-    event: Literal["ask", "sign_in"] = "ask"
+    event: Literal["ask", "sign_in", "plan_change"] = "ask"
     user: str | None = None
     role: str | None = None
     # First 8 hex chars of sha256(key) for denied requests, to spot misuse.

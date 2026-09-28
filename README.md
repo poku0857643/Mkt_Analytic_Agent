@@ -267,6 +267,22 @@ TRUSTED_PROXY_HOPS=1               # on Cloud Run, so the real client IP is used
 - **Client IP:** by default the connecting address is used and `X-Forwarded-For` is
   ignored, because clients can forge it. Behind a proxy, set `TRUSTED_PROXY_HOPS` to
   the number of proxies that append to the header.
+- **Changing plans** (Usage page, or the API): enrolled people choose their own plan,
+  which overrides `USER_PLANS` / `DEFAULT_PLAN`:
+
+  | Action | Effect | API |
+  |---|---|---|
+  | Switch Subscription ↔ Pay as you go | Starts now | `POST /plan {"plan": "payg"}` |
+  | Cancel subscription | Keeps working until the end of the month, then *No plan*; can be undone until then | `POST /plan/cancel`, `POST /plan/resume` |
+  | Stop pay as you go | *No plan* at once | `POST /plan/cancel` |
+  | Choose a plan again | Starts now | `POST /plan` |
+
+  With *No plan*, questions are refused (`402`) and the web app asks the person to
+  choose one. Changes are confirmed on the page and written to the audit log
+  (`plan_change`). Free-trial accounts can't choose a plan; an admin enrols them.
+- **Free trial is off by default** (`FREEMIUM_ENABLED=false`): nobody gets free daily
+  usage, unenrolled people see *You don't have access yet*, and anyone set to
+  `"freemium"` in `USER_PLANS` gets `DEFAULT_PLAN` instead until it's switched back on.
 - **Usage page** (*Usage* in the web app, `GET /usage`): the person's plan, limit
   meters with reset dates, this month's questions and cost, a daily chart, and their
   question history. Admins (`USAGE_ADMIN_ROLES`) also see everyone's usage this month
@@ -363,6 +379,8 @@ web app they're under *Sign in with an access key instead*.
 - `GET /whoami`: shows the user, role and datasets for an API key or signed-in session.
 - `GET /usage`: the caller's plan, limits and usage this month; `GET /usage/all`:
   everyone's, for admins.
+- `POST /plan`, `POST /plan/cancel`, `POST /plan/resume`: change, quit or keep a plan
+  (see [Plans and usage](#plans-and-usage)).
 - `GET /auth/login`, `GET /auth/callback`, `GET /auth/session`, `POST /auth/logout`:
   Google sign-in (see above).
 

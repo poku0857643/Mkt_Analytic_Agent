@@ -28,7 +28,9 @@ from fastapi import Depends, HTTPException, Request, status
 
 from app.config import Settings, get_settings
 
-PLAN_NAMES = {"subscription": "Subscription", "payg": "Pay as you go", "freemium": "Free trial"}
+PLAN_NAMES = {"subscription": "Subscription", "payg": "Pay as you go", "freemium": "Free trial", "none": "No plan"}
+# Plans people can choose for themselves on the usage page.
+SELF_SERVE_PLANS = ("subscription", "payg")
 
 
 # ---------- pricing ----------
@@ -78,7 +80,10 @@ def _matches(email: str, entries: list[str]) -> bool:
 
 
 def plan_for(user: str, settings: Settings) -> str:
-    """Plan for an enrolled person: USER_PLANS entry (exact, then @domain), else the default."""
+    """Configured plan for an enrolled person: USER_PLANS (exact, then @domain), else the default.
+
+    See effective_plan for what actually applies (their own choice, cancellations).
+    """
     key = user.lower()
     for entry, plan in settings.user_plans.items():
         if entry.lower() == key:
@@ -186,6 +191,15 @@ class UsageStore:
                 CREATE INDEX IF NOT EXISTS usage_user_day ON usage (user, day);
                 CREATE INDEX IF NOT EXISTS usage_user_month ON usage (user, month);
                 CREATE INDEX IF NOT EXISTS usage_ip_day ON usage (ip, day, plan);
+                -- A person's own plan choice; overrides USER_PLANS / DEFAULT_PLAN.
+                -- plan "none" means they stopped their plan; cancel_at, when set,
+                -- is when a cancelled subscription ends.
+                CREATE TABLE IF NOT EXISTS plan_choices (
+                  user TEXT PRIMARY KEY,
+                  plan TEXT NOT NULL,
+                  cancel_at TEXT,
+                  updated_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -255,6 +269,19 @@ class UsageStore:
         )
         return [dict(r) for r in rows]
 
+    def plan_choice(self, user: str) -> dict | None:
+        row = self._one("SELECT plan, cancel_at, updated_at FROM plan_choices WHERE user = ?", user)
+        return dict(row) if row else None
+
+    def set_plan_choice(self, user: str, plan: str, cancel_at: str | None, now: datetime) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO plan_choices (user, plan, cancel_at, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(user) DO UPDATE SET plan = excluded.plan, cancel_at = excluded.cancel_at, "
+                "updated_at = excluded.updated_at",
+                (user, plan, cancel_at, now.isoformat(timespec="seconds")),
+            )
+
     def all_users(self, month: str) -> list[dict]:
         rows = self._all(
             "SELECT user, plan, COUNT(*) AS questions, SUM(cost_usd) AS cost_usd, "
@@ -272,6 +299,61 @@ def _usage_store(path: str) -> UsageStore:
 
 def get_usage_store(settings: Annotated[Settings, Depends(get_settings)]) -> UsageStore:
     return _usage_store(settings.usage_db_path)
+
+
+# ---------- plan changes ----------
+
+
+def effective_plan(user: str, settings: Settings, store: UsageStore, now: datetime | None = None) -> str:
+    """The plan that applies now: the person's own choice if they made one, else the configured plan.
+
+    Returns "none" when they stopped their plan or a cancelled subscription has ended.
+    With the free trial switched off, nobody is on the free plan.
+    """
+    now = now or utc_now()
+    choice = store.plan_choice(user)
+    if choice is not None:
+        if choice["plan"] == "none" or (choice["cancel_at"] and now >= datetime.fromisoformat(choice["cancel_at"])):
+            return "none"
+        plan = choice["plan"]
+    else:
+        plan = plan_for(user, settings)
+    if plan == "freemium" and not settings.freemium_enabled:
+        return settings.default_plan
+    return plan
+
+
+def plan_status(user: str, plan: str, store: UsageStore, now: datetime) -> dict:
+    """Whether the plan is active, ending (cancelled, still usable) or absent."""
+    choice = store.plan_choice(user)
+    cancel_at = choice["cancel_at"] if choice else None
+    if plan == "none":
+        return {"state": "none", "ends_on": None}
+    if cancel_at and now < datetime.fromisoformat(cancel_at):
+        return {"state": "ending", "ends_on": datetime.fromisoformat(cancel_at).date().isoformat()}
+    return {"state": "active", "ends_on": None}
+
+
+def choose_plan(user: str, plan: str, store: UsageStore, now: datetime) -> None:
+    """Switch to a self-serve plan now (also undoes a pending cancellation)."""
+    if plan not in SELF_SERVE_PLANS:
+        raise HTTPException(422, f"Plan must be one of {list(SELF_SERVE_PLANS)}")
+    store.set_plan_choice(user, plan, None, now)
+
+
+def cancel_plan(user: str, current: str, store: UsageStore, now: datetime) -> str | None:
+    """Stop the current plan. A subscription runs to the end of the month; pay as you go stops now.
+
+    Returns when it ends (ISO date) for a subscription, None when it stopped at once.
+    """
+    if current == "subscription":
+        ends = next_month_start(now)
+        store.set_plan_choice(user, "subscription", ends.isoformat(), now)
+        return ends.date().isoformat()
+    if current == "payg":
+        store.set_plan_choice(user, "none", None, now)
+        return None
+    raise HTTPException(status.HTTP_409_CONFLICT, "There is no paid plan to cancel.")
 
 
 # ---------- limits ----------
@@ -350,6 +432,11 @@ def enforce(user: str, plan: str, ip: str, store: UsageStore, settings: Settings
     slightly past a cap; the per-minute rate limit bounds how far.
     """
     now = now or utc_now()
+    if plan == "none":
+        raise HTTPException(
+            status.HTTP_402_PAYMENT_REQUIRED,
+            "You don't have an active plan. Choose one on the Usage page to keep asking questions.",
+        )
     if plan == "freemium":
         ends = trial_ends(user, store, settings)
         if ends is not None and now >= ends:

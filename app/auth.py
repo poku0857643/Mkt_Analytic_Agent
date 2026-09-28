@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from app.config import KeyOwner, Settings, get_settings
 from app.sessions import verify
-from app.usage import client_ip, plan_for, trial_refusal
+from app.usage import UsageStore, client_ip, effective_plan, get_usage_store, trial_refusal
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -67,20 +67,21 @@ def read_session(request: Request, settings: Settings) -> dict | None:
     )
 
 
-def _with_datasets(user: str, role: str, settings: Settings) -> User:
+def _with_datasets(user: str, role: str, settings: Settings, usage: UsageStore) -> User:
     datasets = settings.role_datasets.get(role, [])
     if not datasets:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             f"Role '{role}' has no dataset access",
         )
-    return User(user=user, role=role, allowed_datasets=datasets, plan=plan_for(user, settings))
+    return User(user=user, role=role, allowed_datasets=datasets, plan=effective_plan(user, settings, usage))
 
 
 def get_current_user(
     request: Request,
     api_key: Annotated[str | None, Security(api_key_header)],
     settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageStore, Depends(get_usage_store)],
 ) -> User:
     """The caller, from an X-API-Key header (scripts) or a Google sign-in session (people)."""
     if api_key:
@@ -91,7 +92,7 @@ def get_current_user(
                 "Invalid API key",
                 headers={"WWW-Authenticate": "APIKey"},
             )
-        return _with_datasets(owner.user, owner.role, settings)
+        return _with_datasets(owner.user, owner.role, settings, usage)
 
     session = read_session(request, settings)
     if session is None:
@@ -116,4 +117,4 @@ def get_current_user(
                 f"{email} does not have access yet. {refusal}",
             )
         return User(user=email, role="trial", allowed_datasets=list(settings.freemium_datasets), plan="freemium")
-    return _with_datasets(email, role, settings)
+    return _with_datasets(email, role, settings, usage)

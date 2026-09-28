@@ -573,6 +573,7 @@ function askErrorText(err) {
     default:
       return ["Something went wrong", "Your question couldn't be answered. Try again, or rephrase it. If it keeps happening, tell your admin.", true];
     case 402:
+      if ((err.detail || "").includes("active plan")) return ["You don't have an active plan", err.detail, false, true];
       return ["You've reached your plan's limit", err.detail || "Your plan's allowance is used up for now.", false, true];
   }
 }
@@ -973,7 +974,7 @@ function formatBytes(n, queries) {
 
 // ---------- plans and usage ----------
 
-const PLAN_LABELS = { subscription: "Subscription", payg: "Pay as you go", freemium: "Free trial" };
+const PLAN_LABELS = { subscription: "Subscription", payg: "Pay as you go", freemium: "Free trial", none: "No plan" };
 
 function formatUSD(v) {
   if (v > 0 && v < 0.01) return "<$0.01";
@@ -1013,6 +1014,7 @@ window.addEventListener("hashchange", () => {
 $("tab-ask").addEventListener("click", () => showView("ask"));
 $("tab-usage").addEventListener("click", () => showView("usage"));
 $("trial-usage").addEventListener("click", () => showView("usage"));
+$("plan-note-btn").addEventListener("click", () => showView("usage"));
 $("problem-usage").addEventListener("click", () => showView("usage"));
 
 // Keep the plan label and the trial allowance note current.
@@ -1023,6 +1025,21 @@ async function refreshPlan() {
     return;
   }
   renderTrialNote(state.usage);
+  renderPlanNote(state.usage);
+  $("who-plan").textContent = PLAN_LABELS[state.usage.plan.id] || "";
+}
+
+// On the Ask page: say when there's no plan, or a cancelled one is ending.
+function renderPlanNote(report) {
+  const plan = report.plan;
+  const show = plan.state === "none" || plan.state === "ending";
+  $("plan-note").hidden = !show;
+  if (!show) return;
+  $("plan-note-pill").textContent = plan.state === "none" ? "No plan" : "Subscription ending";
+  $("plan-note-text").textContent = plan.state === "none"
+    ? (report.can_change_plan ? "Choose a plan to keep asking questions." : "Ask an admin to set up your plan.")
+    : `Your subscription ends ${formatDay(plan.ends_on)}. You can keep it or switch plans.`;
+  $("plan-note-btn").textContent = plan.state === "none" ? "Choose a plan" : "Manage plan";
 }
 
 function renderTrialNote(report) {
@@ -1059,9 +1076,16 @@ function formatLimit(value, unit) {
 function renderUsage(report) {
   $("plan-name").textContent = report.plan.name;
   $("plan-summary").textContent = report.plan.summary;
+  const ending = report.plan.state === "ending";
+  $("plan-state").hidden = !ending;
+  $("plan-state").className = "pill pill-warning";
+  $("plan-state").textContent = ending ? `Ends ${formatDay(report.plan.ends_on)}` : "";
   $("plan-period").textContent = report.plan.id === "freemium"
     ? (report.trial_ends_on ? `Trial ends ${formatDay(report.trial_ends_on)}` : "")
+    : report.plan.id === "none" ? ""
+    : ending ? `You can keep asking questions until ${formatDay(report.plan.ends_on)}.`
     : `This month renews ${formatDay(report.period.renews_on)}`;
+  renderPlanActions(report);
 
   const list = $("limit-list");
   list.replaceChildren();
@@ -1114,6 +1138,126 @@ function renderUsage(report) {
   drawUsageChart(report);
   renderDailyTable(report);
   renderRecent(report);
+}
+
+// ---------- changing plans ----------
+
+let pendingPlanAction = null;
+
+function planButton(label, cls, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "btn btn-sm " + cls;
+  b.textContent = label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function renderPlanActions(report) {
+  const actions = $("plan-actions");
+  actions.replaceChildren();
+  hideConfirm();
+  const plan = report.plan;
+  const options = Object.fromEntries(report.plan_options.map((o) => [o.id, o]));
+  $("plan-options").hidden = !(report.can_change_plan && plan.state === "none");
+  if (!report.can_change_plan) {
+    if (plan.id === "freemium" || plan.id === "none") {
+      const note = document.createElement("p");
+      note.className = "muted small";
+      note.textContent = "Ask an admin to set up a paid plan.";
+      actions.append(note);
+    }
+    return;
+  }
+
+  if (plan.state === "none") {
+    renderPlanOptions(report, options);
+    return;
+  }
+  const other = plan.id === "subscription" ? "payg" : "subscription";
+  if (plan.state === "ending") {
+    actions.append(planButton("Keep subscription", "btn-primary", () => runPlanAction("/plan/resume", null, "Your subscription will continue.")));
+  }
+  actions.append(planButton(`Switch to ${options[other].name}`, "btn-secondary", () => confirmPlanAction({
+    title: `Switch to ${options[other].name}?`,
+    text: `${options[other].summary} This starts now` + (plan.id === "subscription" ? " and your subscription ends today." : "."),
+    yes: "Switch plan",
+    run: () => runPlanAction("/plan", { plan: other }, `You're now on ${options[other].name}.`),
+  })));
+  if (plan.state === "active" && plan.id === "subscription") {
+    actions.append(planButton("Cancel subscription", "btn-danger-ghost", () => confirmPlanAction({
+      title: "Cancel your subscription?",
+      text: `You can keep asking questions until ${formatDay(report.period.renews_on)}. After that, choose a plan to continue. You can undo this until then.`,
+      yes: "Cancel subscription",
+      run: () => runPlanAction("/plan/cancel", null, `Subscription cancelled. It ends ${formatDay(report.period.renews_on)}.`),
+    })));
+  }
+  if (plan.id === "payg") {
+    actions.append(planButton("Stop pay as you go", "btn-danger-ghost", () => confirmPlanAction({
+      title: "Stop Pay as you go?",
+      text: "Questions stop right away. You can choose a plan again at any time.",
+      yes: "Stop plan",
+      run: () => runPlanAction("/plan/cancel", null, "Pay as you go stopped."),
+    })));
+  }
+}
+
+function renderPlanOptions(report, options) {
+  const list = $("plan-option-list");
+  list.replaceChildren();
+  for (const option of report.plan_options) {
+    const card = document.createElement("div");
+    card.className = "card plan-option";
+    const h = document.createElement("h3");
+    h.textContent = option.name;
+    const p = document.createElement("p");
+    p.textContent = option.summary;
+    card.append(h, p, planButton(`Choose ${option.name}`, "btn-primary", () => confirmPlanAction({
+      title: `Start ${option.name}?`,
+      text: `${option.summary} This starts now.`,
+      yes: `Start ${option.name}`,
+      run: () => runPlanAction("/plan", { plan: option.id }, `You're now on ${option.name}.`),
+    })));
+    list.append(card);
+  }
+}
+
+// Confirm inline rather than with a browser dialog.
+function confirmPlanAction(action) {
+  pendingPlanAction = action;
+  $("confirm-title").textContent = action.title;
+  $("confirm-text").textContent = action.text;
+  $("confirm-yes").textContent = action.yes;
+  $("plan-confirm").hidden = false;
+  $("confirm-yes").focus();
+}
+
+function hideConfirm() {
+  pendingPlanAction = null;
+  $("plan-confirm").hidden = true;
+}
+
+$("confirm-yes").addEventListener("click", () => {
+  const action = pendingPlanAction;
+  hideConfirm();
+  if (action) action.run();
+});
+$("confirm-no").addEventListener("click", hideConfirm);
+
+async function runPlanAction(path, body, done) {
+  const toastEl = $("plan-toast");
+  try {
+    await api(path, { method: "POST", ...(body ? { body } : {}) });
+    // The session's user object carries the plan too; refresh it.
+    try { state.user = await api("/whoami"); } catch {}
+    await loadUsagePage();
+    toastEl.style.color = "";
+    toastEl.textContent = done;
+  } catch (err) {
+    toastEl.style.color = "var(--error)";
+    toastEl.textContent = err instanceof ApiError && err.detail ? err.detail : "Couldn't change your plan. Try again.";
+  }
+  setTimeout(() => { if (toastEl.textContent === done) toastEl.textContent = ""; }, 5000);
 }
 
 function usageMetric(report) {

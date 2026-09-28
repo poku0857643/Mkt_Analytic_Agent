@@ -118,6 +118,11 @@
   <div id="app" class="shell" hidden>
     <main id="main" class="main" tabindex="-1">
      <div id="ask-view">
+      <div id="plan-note" class="trial-note" hidden>
+        <span id="plan-note-pill" class="pill pill-warning"></span>
+        <span id="plan-note-text"></span>
+        <button id="plan-note-btn" type="button" class="btn btn-ghost btn-xs">Manage plan</button>
+      </div>
       <div id="trial-note" class="trial-note" hidden>
         <span class="pill pill-info">Free trial</span>
         <span id="trial-text"></span>
@@ -223,13 +228,32 @@
       <p class="page-sub">Your plan and what you've used this month. Costs are estimates at list prices.</p>
 
       <div class="card plan-card">
-        <div>
+        <div class="plan-main">
           <p class="eyebrow">Your plan</p>
-          <h2 id="plan-name" class="plan-name"></h2>
+          <div class="plan-title-row">
+            <h2 id="plan-name" class="plan-name"></h2>
+            <span id="plan-state" class="pill" hidden></span>
+          </div>
           <p id="plan-summary" class="muted"></p>
+          <p id="plan-period" class="muted small"></p>
         </div>
-        <p id="plan-period" class="muted small"></p>
+        <div id="plan-actions" class="plan-actions"></div>
       </div>
+
+      <div id="plan-confirm" class="card confirm" hidden>
+        <p id="confirm-title" class="confirm-title"></p>
+        <p id="confirm-text" class="muted"></p>
+        <div class="confirm-actions">
+          <button id="confirm-yes" type="button" class="btn btn-primary btn-sm"></button>
+          <button id="confirm-no" type="button" class="btn btn-secondary btn-sm">Not now</button>
+        </div>
+      </div>
+      <p id="plan-toast" class="toast" role="status" aria-live="polite"></p>
+
+      <section id="plan-options" class="plan-options" hidden aria-labelledby="options-title">
+        <h2 id="options-title" class="section-title">Choose a plan</h2>
+        <div id="plan-option-list" class="plan-option-grid"></div>
+      </section>
 
       <div id="limit-list" class="limit-list"></div>
 

@@ -4,7 +4,7 @@ import time
 import uuid
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
@@ -24,14 +24,18 @@ from app.limits import DailyScanBudget, InFlightLimiter, RateLimiter
 from app.mcp_server import build_server
 from app.usage import (
     PLAN_NAMES,
+    SELF_SERVE_PLANS,
     UsageRow,
     UsageStore,
+    cancel_plan,
     charge,
+    choose_plan,
     client_ip,
     enforce,
     get_usage_store,
     limits,
     next_month_start,
+    plan_status,
     price,
     trial_ends,
     utc_now,
@@ -154,10 +158,11 @@ def audited_user(
     api_key: Annotated[str | None, Security(api_key_header)],
     settings: Annotated[Settings, Depends(get_settings)],
     audit: Annotated[AuditLog, Depends(get_audit_log)],
+    usage: Annotated[UsageStore, Depends(get_usage_store)],
 ) -> User:
     """get_current_user, but denied attempts are written to the audit log."""
     try:
-        return get_current_user(request, api_key, settings)
+        return get_current_user(request, api_key, settings, usage)
     except HTTPException as e:
         audit.write(
             AuditRecord(
@@ -373,6 +378,8 @@ def _plan_info(plan: str, settings: Settings) -> dict:
         summary = f"Charged per question at cost \u00d7 {settings.payg_markup:g}" + (
             f", up to ${cap:,.2f} a month." if cap is not None else "."
         )
+    elif plan == "none":
+        summary = "You don't have an active plan. Choose one to keep asking questions."
     else:
         summary = (
             f"Free: up to {settings.freemium_daily_questions} questions a day"
@@ -401,7 +408,10 @@ async def usage_report(
     ends = trial_ends(user.user, usage, settings) if user.plan == "freemium" else None
     return {
         "user": user.user,
-        "plan": _plan_info(user.plan, settings),
+        "plan": {**_plan_info(user.plan, settings), **plan_status(user.user, user.plan, usage, now)},
+        # Enrolled people choose their own plan; trial accounts are enrolled by an admin.
+        "can_change_plan": user.role != "trial",
+        "plan_options": [_plan_info(p, settings) for p in SELF_SERVE_PLANS],
         "period": {"month": month, "renews_on": next_month_start(now).date().isoformat()},
         "today": {"questions": today[0], "cost_usd": round(today[1], 4)},
         "month": {k: round(v, 4) if isinstance(v, float) else v for k, v in usage.month_totals(user.user, month).items()},
@@ -429,3 +439,81 @@ async def usage_all_users(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admins can see everyone's usage")
     month = utc_now().strftime("%Y-%m")
     return {"month": month, "users": usage.all_users(month)}
+
+
+# Changing plans
+
+
+class PlanChoice(BaseModel):
+    plan: Literal["subscription", "payg"]
+
+
+def _plan_owner(user: User) -> User:
+    if user.role == "trial":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Free trial accounts can't choose a plan. Ask an admin to add you.",
+        )
+    return user
+
+
+def _audit_plan(audit: AuditLog, user: User, detail: str) -> None:
+    audit.write(
+        AuditRecord(
+            request_id=str(uuid.uuid4()),
+            event="plan_change",
+            outcome="plan_changed",
+            http_status=status.HTTP_200_OK,
+            user=user.user,
+            role=user.role,
+            error=detail,  # what changed, e.g. "subscription -> payg"
+        )
+    )
+
+
+@app.post("/plan")
+async def change_plan(
+    body: PlanChoice,
+    user: Annotated[User, Depends(get_current_user)],
+    audit: Annotated[AuditLog, Depends(get_audit_log)],
+    usage: Annotated[UsageStore, Depends(get_usage_store)],
+):
+    """Switch to Subscription or Pay as you go, starting now (undoes a pending cancellation)."""
+    _plan_owner(user)
+    now = utc_now()
+    choose_plan(user.user, body.plan, usage, now)
+    _audit_plan(audit, user, f"{user.plan} -> {body.plan}")
+    return {"plan": body.plan, **plan_status(user.user, body.plan, usage, now)}
+
+
+@app.post("/plan/cancel")
+async def cancel_current_plan(
+    user: Annotated[User, Depends(get_current_user)],
+    audit: Annotated[AuditLog, Depends(get_audit_log)],
+    usage: Annotated[UsageStore, Depends(get_usage_store)],
+):
+    """Quit: a subscription runs to the end of the month, pay as you go stops now."""
+    _plan_owner(user)
+    now = utc_now()
+    if plan_status(user.user, user.plan, usage, now)["state"] == "ending":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Your subscription is already cancelled.")
+    ends_on = cancel_plan(user.user, user.plan, usage, now)
+    _audit_plan(audit, user, f"cancel {user.plan}" + (f", ends {ends_on}" if ends_on else ", ended now"))
+    plan = user.plan if ends_on else "none"
+    return {"plan": plan, **plan_status(user.user, plan, usage, now)}
+
+
+@app.post("/plan/resume")
+async def resume_subscription(
+    user: Annotated[User, Depends(get_current_user)],
+    audit: Annotated[AuditLog, Depends(get_audit_log)],
+    usage: Annotated[UsageStore, Depends(get_usage_store)],
+):
+    """Keep a cancelled subscription that hasn't ended yet."""
+    _plan_owner(user)
+    now = utc_now()
+    if plan_status(user.user, user.plan, usage, now)["state"] != "ending":
+        raise HTTPException(status.HTTP_409_CONFLICT, "There is no cancellation to undo.")
+    choose_plan(user.user, "subscription", usage, now)
+    _audit_plan(audit, user, "resume subscription")
+    return {"plan": "subscription", **plan_status(user.user, "subscription", usage, now)}
