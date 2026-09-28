@@ -659,7 +659,10 @@ Dockerfile           Production image
 Each feature was built on its own branch, each based on the previous one:
 `docs/workflow-diagrams` → `feature/project-setup` → `feature/api-key-auth` →
 `feature/query-guardrails` → `feature/bigquery-mcp-server` → `feature/analytics-agent`
-→ `feature/ask-endpoint` → `feature/hardening` → `feature/web-ui`.
+→ `feature/ask-endpoint` → `feature/hardening` → `feature/web-ui` →
+`feature/ui-restyle` → `feature/google-sign-in` → `feature/plans-and-usage` →
+`feature/abuse-protection` → `feature/plan-management` → `feature/analysis-reports` →
+`feature/pricing-page`.
 
 ## Known limitations
 
