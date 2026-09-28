@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from google.cloud import bigquery
 from pydantic import BaseModel, Field
 
-from app.agent import AgentResult, AnalyticsAgent, Chart, Report, build_agent
+from app.agent import AgentResult, AnalyticsAgent, Chart, Framework, Report, build_agent
 from app.audit import AuditLog, AuditQuery, AuditRecord, get_audit_log
 from app.auth import User, api_key_header, get_current_user, hash_key
 from app.bigquery_tools import BigQueryTools
@@ -164,6 +164,8 @@ class AskResponse(BaseModel):
     chart: Chart | None
     # Findings, drivers, recommendations and caveats, for analysis requests only.
     report: Report | None = None
+    # ERRC grid, SWOT, AARRR funnel, BCG matrix or Pareto, when one was asked for.
+    framework: Framework | None = None
     sql_used: list[str]
     bytes_processed: int
 
@@ -375,6 +377,7 @@ async def ask(
         summary=result.answer.summary,
         chart=result.answer.chart,
         report=result.answer.report,
+        framework=result.answer.framework,
         sql_used=result.sql_used,
         bytes_processed=record.total_bytes_processed,
     )

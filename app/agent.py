@@ -75,6 +75,35 @@ target, or a test such as an A/B test).
       - caveats: limitations of the data that affect these conclusions.
    The summary is then a 2-4 sentence executive summary of the report.
 
+3. Framework requests (the user names a framework, or asks for "a framework", a \
+grid or a matrix): do the analysis as in 2, then fill framework with one of these, \
+using exactly these cell keys and labels, in this order:
+   - "errc" (ERRC grid): eliminate "Eliminate", reduce "Reduce", raise "Raise", \
+create "Create". Items are actions on the subject (channels, campaigns, products, \
+pages): eliminate what costs volume or money and returns little, reduce what is \
+over-invested, raise what performs well but is under-used, create what the data \
+shows is missing.
+   - "swot": strengths "Strengths", weaknesses "Weaknesses", opportunities \
+"Opportunities", threats "Threats". Strengths and weaknesses come from performance \
+in the data. Opportunities and threats are external; mark them "hypothesis" unless \
+the data shows them.
+   - "aarrr" (pirate funnel): acquisition "Acquisition", activation "Activation", \
+retention "Retention", referral "Referral", revenue "Revenue". For each stage give \
+its metric from the data and its biggest leak. If a stage can't be measured, say so \
+in one item marked "hypothesis".
+   - "bcg" (growth-share matrix): stars "Stars", cash_cows "Cash cows", \
+question_marks "Question marks", dogs "Dogs". Place each channel or product \
+category by its share of revenue and its growth between the first and last full \
+months in the data. State the share and growth cut-offs you used in the takeaway.
+   - "pareto" (80/20): vital_few "Vital few", useful_many "Useful many". The vital \
+few are the smallest set of items reaching about 80% of the metric, each with its \
+cumulative share; summarise the rest.
+   Every item has a point, its evidence (figures from query results, or for a \
+hypothesis the data that would test it) and a confidence, graded as for drivers. \
+Give 2-5 items per cell. subject says what was analysed and the date range; \
+takeaway is one sentence on what to do. Also fill report, with recommendations \
+that follow from the framework. For all other questions set framework to null.
+
 Final answer: set status to "answered" when the data answered the question, \
 "limitation" when it was a data question the data or rules couldn't fully answer, and \
 "declined" for requests outside scope. For lookups the summary is 2-5 sentences for a \
@@ -125,12 +154,60 @@ class Report(BaseModel):
     caveats: list[str]
 
 
+FrameworkType = Literal["errc", "swot", "aarrr", "bcg", "pareto"]
+
+# Cell keys and labels per framework, in display order.
+FRAMEWORK_CELLS: dict[str, list[tuple[str, str]]] = {
+    "errc": [("eliminate", "Eliminate"), ("reduce", "Reduce"), ("raise", "Raise"), ("create", "Create")],
+    "swot": [("strengths", "Strengths"), ("weaknesses", "Weaknesses"),
+             ("opportunities", "Opportunities"), ("threats", "Threats")],
+    "aarrr": [("acquisition", "Acquisition"), ("activation", "Activation"), ("retention", "Retention"),
+              ("referral", "Referral"), ("revenue", "Revenue")],
+    "bcg": [("stars", "Stars"), ("cash_cows", "Cash cows"), ("question_marks", "Question marks"), ("dogs", "Dogs")],
+    "pareto": [("vital_few", "Vital few"), ("useful_many", "Useful many")],
+}
+
+
+class FrameworkItem(BaseModel):
+    point: str
+    # The figures that show it, or for a hypothesis, the data that would test it.
+    evidence: str
+    confidence: Literal["supported", "likely", "hypothesis"]
+
+
+class FrameworkCell(BaseModel):
+    key: str
+    label: str
+    items: list[FrameworkItem]
+
+
+class Framework(BaseModel):
+    type: FrameworkType
+    title: str
+    subject: str  # what was analysed, and the date range
+    cells: list[FrameworkCell]
+    takeaway: str
+
+    def normalized(self) -> "Framework":
+        """Cells in the framework's order with its labels; unexpected cells kept at the end."""
+        expected = FRAMEWORK_CELLS[self.type]
+        by_key = {c.key.lower().replace(" ", "_").replace("-", "_"): c for c in self.cells}
+        cells = [
+            FrameworkCell(key=key, label=label, items=by_key.pop(key).items if key in by_key else [])
+            for key, label in expected
+        ]
+        cells += list(by_key.values())
+        return self.model_copy(update={"cells": cells})
+
+
 class AgentAnswer(BaseModel):
     status: Literal["answered", "limitation", "declined"]
     summary: str
     chart: Chart | None
     # Only for analysis requests (why / what to do); null for lookups.
     report: Report | None = None
+    # Only when a framework (ERRC, SWOT, AARRR, BCG, Pareto) is asked for.
+    framework: Framework | None = None
 
 
 def _strict_schema(model: type[BaseModel]) -> dict:
@@ -189,11 +266,11 @@ class AgentResult:
 
 
 def _declined(summary: str) -> AgentAnswer:
-    return AgentAnswer(status="declined", summary=summary, chart=None, report=None)
+    return AgentAnswer(status="declined", summary=summary, chart=None, report=None, framework=None)
 
 
 def _limitation(summary: str) -> AgentAnswer:
-    return AgentAnswer(status="limitation", summary=summary, chart=None, report=None)
+    return AgentAnswer(status="limitation", summary=summary, chart=None, report=None, framework=None)
 
 
 def _tool_text(result) -> str:
@@ -379,9 +456,12 @@ class AnalyticsAgent:
     def _parse_answer(response) -> AgentAnswer:
         text = next((b.text for b in response.content if b.type == "text"), "")
         try:
-            return AgentAnswer.model_validate_json(text)
+            answer = AgentAnswer.model_validate_json(text)
         except ValidationError:
             return _limitation("The analysis finished but returned an answer in an unexpected format.")
+        if answer.framework is not None:
+            answer.framework = answer.framework.normalized()
+        return answer
 
 
 def build_agent(settings) -> AnalyticsAgent:

@@ -301,3 +301,12 @@ def test_report_reaches_the_caller(h):
     body = h.ask().json()
     assert body["report"]["recommendations"][0]["impact"] == "high"
     assert body["report"]["drivers"][1]["confidence"] == "hypothesis"
+
+
+def test_framework_reaches_the_caller(h):
+    from tests.test_agent import FRAMEWORK_ANSWER
+
+    h.script(query(GOOD_SQL, "t1"), final(FRAMEWORK_ANSWER))
+    body = h.ask().json()
+    assert body["framework"]["type"] == "errc"
+    assert [c["key"] for c in body["framework"]["cells"]][:4] == ["eliminate", "reduce", "raise", "create"]

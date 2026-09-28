@@ -129,3 +129,14 @@ def test_analysis_request_returns_a_grounded_report():
     # It measured before concluding: the headline comparison plus breakdowns.
     assert len(result.sql_used) >= 2
     print(f"\nturns={result.turns} tokens={result.total_tokens} queries={len(result.sql_used)}")
+
+
+def test_errc_grid_is_built_from_the_data():
+    result = ask("Build an ERRC grid for our marketing channels", datasets=("ga4",), **LIMITS)
+    assert result.answer.status == "answered"
+    fw = result.answer.framework
+    assert fw is not None and fw.type == "errc"
+    assert [c.key for c in fw.cells] == ["eliminate", "reduce", "raise", "create"]
+    assert sum(len(c.items) for c in fw.cells) >= 8
+    assert all(i.evidence for c in fw.cells for i in c.items)
+    assert len(result.sql_used) >= 2

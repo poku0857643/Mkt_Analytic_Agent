@@ -342,6 +342,23 @@ curl -X POST http://127.0.0.1:8000/ask \
   evidence or the data that would test it), `recommendations` (impact, effort and how
   to measure success) and `caveats`. The web app shows it as a report that can be
   copied or printed / saved as PDF.
+- `framework` is `null` unless a framework is asked for. The assistant then does the
+  same analysis and returns one of:
+
+  | `type` | Framework | Cells |
+  |---|---|---|
+  | `errc` | ERRC grid (Blue Ocean) | Eliminate, Reduce, Raise, Create |
+  | `swot` | SWOT | Strengths, Weaknesses, Opportunities, Threats (external ones marked hypothesis unless the data shows them) |
+  | `aarrr` | Pirate funnel | Acquisition, Activation, Retention, Referral, Revenue: each stage's metric and biggest leak |
+  | `bcg` | Growth-share matrix | Stars, Cash cows, Question marks, Dogs, with the share and growth cut-offs used |
+  | `pareto` | 80/20 | Vital few (with cumulative shares), Useful many |
+
+  Each point has evidence and a `supported` / `likely` / `hypothesis` grade, plus a
+  one-line `takeaway`; a report with recommendations comes with it. Cells are
+  normalised server-side to the framework's keys and order. The web app lays each one
+  out to suit it (2×2 grid, stage flow or 80/20 split), with ready-made prompts under
+  *Analysis frameworks*. Measured: an ERRC grid took 117 s and 5 queries, an AARRR
+  funnel 130 s and 9 queries, similar in cost to a report.
 - `status` is `answered`; `limitation` when the data or the security rules didn't
   allow a full answer; or `declined` when the request wasn't a question about the data
   (the assistant only answers those). The summary then explains why, for example "phone numbers are
@@ -668,7 +685,8 @@ Each feature was built on its own branch, each based on the previous one:
 → `feature/ask-endpoint` → `feature/hardening` → `feature/web-ui` →
 `feature/ui-restyle` → `feature/google-sign-in` → `feature/plans-and-usage` →
 `feature/abuse-protection` → `feature/plan-management` → `feature/analysis-reports` →
-`feature/pricing-page` → `feature/intro-page` → `feature/errc-highlight`.
+`feature/pricing-page` → `feature/intro-page` → `feature/errc-highlight` →
+`feature/analysis-frameworks`.
 
 ## Known limitations
 

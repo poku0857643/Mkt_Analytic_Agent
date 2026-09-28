@@ -324,6 +324,7 @@ const ICONS = {
   marketing: ["M3 9v2l9 4V5L3 9z", "M12 7h2a3 3 0 0 1 0 6h-2", "M5 11.5l1 4.5h2l-.5-3.6"],
   customers: ["M7 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M1.5 17a5.5 5.5 0 0 1 11 0", "M13 3.5a3 3 0 0 1 0 5.5", "M15 12.3a5.5 5.5 0 0 1 3.5 4.7"],
   arrow: ["M4 10h12", "M11 5l5 5-5 5"],
+  grid: ["M3 3h6v6H3z", "M11 3h6v6h-6z", "M3 11h6v6H3z", "M11 11h6v6h-6z"],
 };
 
 function icon(name) {
@@ -336,6 +337,50 @@ function icon(name) {
     svg.append(path);
   }
   return svg;
+}
+
+function frameworkCard(subject, paretoItems) {
+  const card = document.createElement("section");
+  card.className = "card dataset";
+  const head = document.createElement("div");
+  head.className = "dataset-head";
+  const badge = document.createElement("span");
+  badge.className = "dataset-icon fw-icon";
+  badge.append(icon("grid"));
+  const h = document.createElement("h3");
+  h.className = "dataset-title";
+  h.textContent = "Analysis frameworks";
+  head.append(badge, h);
+  const p = document.createElement("p");
+  p.className = "dataset-about";
+  p.textContent = "Structured analyses built from your data, each point with its evidence. They take about 2 minutes.";
+  const ul = document.createElement("ul");
+  ul.className = "examples";
+  const prompts = [
+    "Build an ERRC grid for our marketing channels",
+    `Do a SWOT analysis of our ${subject}`,
+    "Map our AARRR funnel: acquisition, activation, retention, referral and revenue",
+    "Place our channels on a BCG growth-share matrix",
+    `Pareto analysis: which ${paretoItems} bring in 80% of revenue?`,
+  ];
+  for (const q of prompts) {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "example";
+    const label = document.createElement("span");
+    label.textContent = q;
+    b.append(label, icon("arrow"));
+    b.addEventListener("click", () => {
+      $("question").value = q;
+      updateCount();
+      ask(q);
+    });
+    li.append(b);
+    ul.append(li);
+  }
+  card.append(head, p, ul);
+  return card;
 }
 
 function renderDatasets() {
@@ -380,6 +425,8 @@ function renderDatasets() {
     card.append(head, p, ul);
     list.append(card);
   }
+  const ga4 = known.includes("ga4");
+  list.append(frameworkCard(ga4 ? "website traffic" : "marketing channels", ga4 ? "products" : "campaigns"));
   if (unknown.length) {
     const p = document.createElement("p");
     p.textContent = `You can also ask about: ${unknown.join(", ")}. Try "What tables can I ask about, and what's in them?"`;
@@ -609,6 +656,7 @@ function showAnswer(item) {
   $("answer-summary").textContent = r.summary;
 
   renderReport(r.report || null);
+  renderFramework(r.framework || null);
 
   const chart = hasChart(r) ? r.chart : null;
   $("chart-wrap").hidden = !chart;
@@ -675,7 +723,7 @@ function itemMeta(label, text) {
 
 function renderReport(report) {
   $("report").hidden = !report;
-  $("print-report").hidden = !report;
+  $("print-report").hidden = !report && !(state.current && state.current.response.framework);
   if (!report) return;
 
   const findings = $("report-findings");
@@ -719,6 +767,72 @@ function renderReport(report) {
 }
 
 $("print-report").addEventListener("click", () => window.print());
+
+// ---------- analysis frameworks ----------
+
+const FRAMEWORKS = {
+  errc: { name: "ERRC grid", layout: "fw-2x2", hot: ["raise", "create"] },
+  swot: { name: "SWOT analysis", layout: "fw-2x2", hot: ["strengths", "opportunities"] },
+  aarrr: { name: "AARRR funnel", layout: "fw-flow", hot: [], numbered: true },
+  bcg: { name: "BCG growth-share matrix", layout: "fw-2x2", hot: ["stars"] },
+  pareto: { name: "Pareto (80/20)", layout: "fw-split", hot: ["vital_few"] },
+};
+
+function renderFramework(fw) {
+  $("framework").hidden = !fw;
+  if (!fw) return;
+  const spec = FRAMEWORKS[fw.type] || { name: "Framework", layout: "fw-2x2", hot: [] };
+  $("framework-kind").textContent = spec.name;
+  $("framework-title").textContent = fw.title;
+  $("framework-subject").textContent = fw.subject;
+  $("framework-takeaway").textContent = fw.takeaway;
+
+  const cells = $("framework-cells");
+  cells.className = "framework-cells " + spec.layout;
+  cells.replaceChildren();
+  fw.cells.forEach((cell, i) => {
+    const box = document.createElement("section");
+    box.className = "fw-cell" + (spec.hot.includes(cell.key) ? " hot" : "");
+    box.setAttribute("aria-label", cell.label);
+    const head = document.createElement("div");
+    head.className = "fw-cell-head";
+    if (spec.numbered) {
+      const n = document.createElement("span");
+      n.className = "fw-step";
+      n.textContent = String(i + 1).padStart(2, "0");
+      head.append(n);
+    }
+    const label = document.createElement("span");
+    label.className = "fw-label";
+    label.textContent = cell.label;
+    head.append(label);
+    box.append(head);
+
+    if (!cell.items.length) {
+      const empty = document.createElement("p");
+      empty.className = "fw-empty";
+      empty.textContent = "Nothing the data puts here.";
+      box.append(empty);
+    } else {
+      const ul = document.createElement("ul");
+      ul.className = "fw-items";
+      for (const item of cell.items) {
+        const li = document.createElement("li");
+        const point = document.createElement("span");
+        point.className = "fw-point";
+        const [tagText, tagCls] = CONFIDENCE[item.confidence] || [item.confidence, "tag-neutral"];
+        point.append(item.point, tag(tagText, tagCls));
+        const ev = document.createElement("span");
+        ev.className = "fw-evidence";
+        ev.textContent = (item.confidence === "hypothesis" ? "To test: " : "") + item.evidence;
+        li.append(point, ev);
+        ul.append(li);
+      }
+      box.append(ul);
+    }
+    cells.append(box);
+  });
+}
 
 function renderTable(chart) {
   const table = $("chart-table");
@@ -964,6 +1078,18 @@ async function copyText(text) {
 function answerAsText(item) {
   const r = item.response;
   const lines = [item.question, "", r.summary];
+  if (r.framework) {
+    const fw = r.framework;
+    lines.push("", `${(FRAMEWORKS[fw.type] || { name: "Framework" }).name.toUpperCase()}: ${fw.title}`, fw.subject);
+    for (const cell of fw.cells) {
+      lines.push("", cell.label.toUpperCase());
+      for (const it of cell.items) {
+        lines.push(`- ${it.point} [${(CONFIDENCE[it.confidence] || [it.confidence])[0]}]`);
+        lines.push(`  ${it.confidence === "hypothesis" ? "To test" : "Evidence"}: ${it.evidence}`);
+      }
+    }
+    lines.push("", `Takeaway: ${fw.takeaway}`);
+  }
   if (r.report) {
     const rep = r.report;
     lines.push("", "KEY FINDINGS");

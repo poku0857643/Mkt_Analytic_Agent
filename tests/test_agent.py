@@ -260,3 +260,49 @@ def test_answer_schema_requires_report_and_has_no_defaults():
     driver = schema["$defs"]["Driver"]
     assert driver["properties"]["confidence"]["enum"] == ["supported", "likely", "hypothesis"]
     assert driver["additionalProperties"] is False
+
+
+FRAMEWORK_ANSWER = {
+    **REPORT_ANSWER,
+    "framework": {
+        "type": "errc",
+        "title": "ERRC grid for marketing channels",
+        "subject": "GA4 channels, Nov 2020 - Jan 2021",
+        # Out of order, with a differently-written key and an unexpected cell.
+        "cells": [
+            {"key": "create", "label": "Create", "items": [
+                {"point": "Cart recovery", "evidence": "15,188 carts vs 4,837 purchases", "confidence": "supported"}]},
+            {"key": "Eliminate", "label": "eliminate!", "items": [
+                {"point": "Affiliates", "evidence": "$167 revenue", "confidence": "supported"}]},
+            {"key": "raise", "label": "Raise", "items": []},
+            {"key": "extra", "label": "Extra", "items": []},
+        ],
+        "takeaway": "Cut Affiliates; scale Email.",
+    },
+}
+
+
+def test_framework_is_normalised_to_its_cells():
+    result, _, _ = run([final(FRAMEWORK_ANSWER)])
+    fw = result.answer.framework
+    assert [c.key for c in fw.cells] == ["eliminate", "reduce", "raise", "create", "extra"]
+    assert [c.label for c in fw.cells][:4] == ["Eliminate", "Reduce", "Raise", "Create"]
+    assert fw.cells[0].items[0].point == "Affiliates"
+    assert fw.cells[1].items == []  # missing cell filled in empty
+
+
+def test_every_framework_type_has_its_cells():
+    from app.agent import FRAMEWORK_CELLS
+
+    assert set(FRAMEWORK_CELLS) == {"errc", "swot", "aarrr", "bcg", "pareto"}
+    assert len(FRAMEWORK_CELLS["aarrr"]) == 5
+    assert [k for k, _ in FRAMEWORK_CELLS["bcg"]] == ["stars", "cash_cows", "question_marks", "dogs"]
+
+
+def test_prompt_describes_each_framework():
+    from app.agent import SYSTEM_PROMPT
+
+    prompt = " ".join(SYSTEM_PROMPT.split())
+    for phrase in ('"errc" (ERRC grid)', '"swot"', '"aarrr" (pirate funnel)', '"bcg" (growth-share matrix)', '"pareto" (80/20)'):
+        assert phrase in prompt
+    assert "For all other questions set framework to null" in prompt

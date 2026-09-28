@@ -952,3 +952,34 @@ mark.hl {
 .errc-ours { color: var(--text-secondary); }
 .errc-ours .errc-tag { color: var(--accent); }
 .errc.hot .errc-ours .errc-tag { color: var(--highlight-text); }
+
+/* ---------- analysis frameworks ---------- */
+.framework { margin-top: 24px; border-top: 1px solid var(--hairline); padding-top: 18px; }
+.framework-head { margin-bottom: 14px; }
+.framework-head .eyebrow { margin-bottom: 2px; }
+.framework-title { font-size: 1.125rem; font-weight: 650; margin-bottom: 2px; }
+.framework-cells { display: grid; gap: 12px; }
+.fw-2x2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.fw-split { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+.fw-flow { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .fw-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .fw-2x2, .fw-split, .fw-flow { grid-template-columns: minmax(0, 1fr); } }
+.fw-cell { border: 1px solid var(--hairline); border-top: 3px solid var(--border); border-radius: var(--radius); padding: 14px 16px; background: var(--surface); }
+.fw-cell.hot { border-top-color: var(--highlight); background: linear-gradient(var(--highlight-soft), var(--surface) 64px); }
+.fw-cell-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.fw-step { font-size: 0.6875rem; font-weight: 700; color: var(--muted); }
+.fw-label { font-weight: 650; font-size: 0.9375rem; }
+.fw-cell.hot .fw-label { color: var(--highlight-text); }
+.fw-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.fw-items li { font-size: 0.875rem; color: var(--text); line-height: 1.5; }
+.fw-point { display: block; margin-bottom: 2px; }
+.fw-items .tag { margin-left: 6px; vertical-align: 1px; }
+.fw-evidence { display: block; font-size: 0.8125rem; color: var(--muted); }
+.fw-empty { font-size: 0.8125rem; color: var(--muted); font-style: italic; }
+.framework-takeaway { margin-top: 14px; padding: 12px 16px; border-radius: var(--radius); background: var(--highlight-soft); color: var(--text); font-size: 0.9375rem; }
+.takeaway-label { font-weight: 700; color: var(--highlight-text); margin-right: 4px; }
+@media print { .fw-cell { break-inside: avoid; } }
+.dataset-icon.fw-icon { background: var(--highlight-soft); }
+.dataset-icon.fw-icon svg { stroke: var(--highlight-text); }
+.kind-frameworks { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 0.9375rem; }
+.kind-frameworks strong { color: var(--highlight-text); font-weight: 600; }
