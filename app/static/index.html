@@ -184,6 +184,27 @@
           </details>
         </figure>
 
+        <section id="report" class="report" hidden aria-label="Report">
+          <div class="report-block">
+            <h3 class="report-heading">Key findings</h3>
+            <ol id="report-findings" class="report-list"></ol>
+          </div>
+          <div class="report-block">
+            <h3 class="report-heading">Why it's happening</h3>
+            <p class="report-note">Each reason is marked by how strongly the data supports it.</p>
+            <ul id="report-drivers" class="report-list plain"></ul>
+          </div>
+          <div class="report-block">
+            <h3 class="report-heading">Recommendations</h3>
+            <p class="report-note">Ordered by expected impact, then effort.</p>
+            <ol id="report-recs" class="report-list"></ol>
+          </div>
+          <div id="report-caveats-block" class="report-block">
+            <h3 class="report-heading">Caveats</h3>
+            <ul id="report-caveats" class="report-list bullets"></ul>
+          </div>
+        </section>
+
         <div class="toolbar" role="group" aria-label="Use this answer">
           <button id="copy-answer" type="button" class="btn btn-secondary btn-sm">
             <svg class="btn-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"></rect><path d="M13 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path></svg>
@@ -196,6 +217,10 @@
           <button id="dl-png" type="button" class="btn btn-secondary btn-sm" hidden>
             <svg class="btn-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16h12"></path></svg>
             Chart image (.png)
+          </button>
+          <button id="print-report" type="button" class="btn btn-secondary btn-sm" hidden>
+            <svg class="btn-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8V3h8v5M6 14H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-2M6 12h8v5H6z"></path></svg>
+            Print or save as PDF
           </button>
           <button id="copy-link" type="button" class="btn btn-secondary btn-sm">
             <svg class="btn-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 11.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1M11.5 8.5a3.5 3.5 0 0 0-5 0L4 11a3.5 3.5 0 0 0 5 5l1-1"></path></svg>

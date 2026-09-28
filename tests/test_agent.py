@@ -216,3 +216,47 @@ def test_malformed_final_answer_is_a_limitation():
     result, _, _ = run([reply("end_turn", SimpleNamespace(type="text", text="not json"))])
     assert result.answer.status == "limitation"
     assert "unexpected format" in result.answer.summary
+
+
+REPORT_ANSWER = {
+    **ANSWER,
+    "summary": "Mobile converts slightly better than desktop.",
+    "report": {
+        "findings": [{"title": "Similar conversion", "detail": "Mobile 1.39% vs desktop 1.31% (Nov 2020 - Jan 2021)."}],
+        "drivers": [
+            {"title": "Checkout", "explanation": "Mobile loses fewer shoppers at checkout.",
+             "evidence": "Checkout-to-purchase 44% vs 41%.", "confidence": "supported"},
+            {"title": "Page speed", "explanation": "Slow pages may hurt mobile.",
+             "evidence": "Needs page timing data.", "confidence": "hypothesis"},
+        ],
+        "recommendations": [
+            {"action": "Simplify mobile checkout", "rationale": "Checkout is the biggest drop.",
+             "impact": "high", "effort": "medium", "measure": "A/B test; target +0.2 pt conversion."}
+        ],
+        "caveats": ["Sample data with obfuscated sources."],
+    },
+}
+
+
+def test_analysis_report_is_parsed():
+    result, _, _ = run([final(REPORT_ANSWER)])
+    report = result.answer.report
+    assert [d.confidence for d in report.drivers] == ["supported", "hypothesis"]
+    assert report.recommendations[0].measure.startswith("A/B test")
+
+
+def test_lookup_answers_have_no_report():
+    result, _, _ = run([final()])
+    assert result.answer.report is None
+
+
+def test_answer_schema_requires_report_and_has_no_defaults():
+    from app.agent import ANSWER_FORMAT
+
+    schema = ANSWER_FORMAT["schema"]
+    assert "report" in schema["required"]
+    assert {"Report", "Finding", "Driver", "Recommendation"} <= set(schema["$defs"])
+    assert "default" not in json.dumps(schema)
+    driver = schema["$defs"]["Driver"]
+    assert driver["properties"]["confidence"]["enum"] == ["supported", "likely", "hypothesis"]
+    assert driver["additionalProperties"] is False
