@@ -54,3 +54,27 @@ class DailyScanBudget:
     def add(self, user: str, bytes_scanned: int) -> None:
         with self._lock:
             self._used[(user, self.today())] += bytes_scanned
+
+
+class InFlightLimiter:
+    """At most `limit` questions running at once per user.
+
+    Stops one person running many questions in parallel, which would also let
+    them slip past usage caps that are checked before each question starts.
+    """
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self._running: dict[str, int] = defaultdict(int)
+        self._lock = threading.Lock()
+
+    def try_acquire(self, user: str) -> bool:
+        with self._lock:
+            if self._running[user] >= self.limit:
+                return False
+            self._running[user] += 1
+            return True
+
+    def release(self, user: str) -> None:
+        with self._lock:
+            self._running[user] = max(self._running[user] - 1, 0)

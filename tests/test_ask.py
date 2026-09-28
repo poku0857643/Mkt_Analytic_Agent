@@ -12,10 +12,11 @@ from app.api import (
     get_audit_log,
     get_bigquery_client,
     get_rate_limiter,
+    get_inflight_limiter,
     get_scan_budget,
 )
 from app.audit import JsonLinesAuditLog
-from app.limits import DailyScanBudget, RateLimiter
+from app.limits import DailyScanBudget, InFlightLimiter, RateLimiter
 from tests.conftest import ADMIN_KEY, ANALYST_KEY, NO_ACCESS_KEY
 from tests.fake_bigquery import FakeClient
 from tests.test_agent import ANSWER, GOOD_SQL, FakeAnthropic, final, query
@@ -39,6 +40,7 @@ class Harness:
         self.claude = None
         self.limiter = RateLimiter(limit=100)
         self.budget = DailyScanBudget(limit_bytes=10**9, today=lambda: "2026-09-26")
+        self.inflight = InFlightLimiter(1)
 
     def script(self, *responses):
         self.claude = FakeAnthropic(responses)
@@ -58,6 +60,7 @@ def h(client):
     # Fresh limits per test; the process-wide ones would leak between tests.
     app.dependency_overrides[get_rate_limiter] = lambda: harness.limiter
     app.dependency_overrides[get_scan_budget] = lambda: harness.budget
+    app.dependency_overrides[get_inflight_limiter] = lambda: harness.inflight
     harness.script()  # no Claude calls unless a test scripts them
     return harness
 

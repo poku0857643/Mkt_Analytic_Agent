@@ -21,3 +21,6 @@ __pycache__/
 /memo
 # Audit logs
 logs/
+
+# Usage metering database
+data/
