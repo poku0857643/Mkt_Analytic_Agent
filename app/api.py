@@ -63,7 +63,7 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     # Question text can appear in UI links (?q=); don't leak it to other sites.
     response.headers["Referrer-Policy"] = "no-referrer"
-    if request.url.path in ("/", "/plans") or request.url.path.startswith("/static/"):
+    if request.url.path in ("/", "/plans", "/welcome") or request.url.path.startswith("/static/"):
         response.headers["Content-Security-Policy"] = UI_CSP
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Cache-Control"] = "no-cache"
@@ -128,6 +128,12 @@ app.include_router(google_auth_router)
 async def web_ui():
     """Browser UI for non-technical users; it calls /whoami and /ask."""
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/welcome", include_in_schema=False)
+async def welcome_page():
+    """Public intro page for people who haven't used the app yet."""
+    return FileResponse(STATIC_DIR / "welcome.html")
 
 
 @app.get("/plans", include_in_schema=False)

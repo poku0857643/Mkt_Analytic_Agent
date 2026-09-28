@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marketing Answers · Ask your marketing data in plain English</title>
+  <meta name="description" content="Ask questions about your marketing data in plain English and get clear answers, charts and reports you can use straight away.">
+  <link rel="icon" href="data:,">
+  <link rel="preload" href="/static/vendor/inter/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="intro-body">
+  <a href="#main" class="skip-link">Skip to main content</a>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand brand-link" href="/welcome">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="8"></rect>
+          <path d="M9 22V15M16 22V10M23 22V18"></path>
+        </svg>
+        <span class="brand-name">Marketing Answers</span>
+      </a>
+      <nav class="intro-nav" aria-label="Page">
+        <a href="#how">How it works</a>
+        <a href="#safe">Security</a>
+        <a href="/plans">Pricing</a>
+        <a class="btn btn-primary btn-sm" href="/?signin=1">Sign in</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <!-- Hero -->
+    <section class="intro-hero">
+      <div class="intro-wrap hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">For marketing teams</p>
+          <h1 class="hero-title">Answers from your marketing data, in plain English.</h1>
+          <p class="hero-sub">Ask a question the way you'd ask a colleague. Get a clear answer, a chart, and a file you can drop straight into your report. No SQL, no waiting for the data team.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary hero-btn" href="/?signin=1">Get started</a>
+            <a class="btn btn-secondary hero-btn" href="/plans">See plans and pricing</a>
+          </div>
+          <p class="hero-note">Sign in with your work Google account. Nothing to install.</p>
+        </div>
+
+        <figure class="card demo-card" aria-labelledby="demo-caption">
+          <div class="demo-question">
+            <span class="demo-label">Question</span>
+            Which marketing channel brought in the most revenue?
+          </div>
+          <div class="demo-answer">
+            <span class="pill pill-success">Answered</span>
+            <p>Referral was the top channel, bringing in <strong>$181,603</strong>, about 53% of the $339,457 total, followed by Organic Search at $109,005.</p>
+            <div class="demo-chart" role="img" aria-label="Revenue by channel: Referral $181,603, Organic Search $109,005, Direct $22,643, Unknown $21,266, Paid Search $3,114">
+              <div class="demo-row"><span>Referral</span><span class="demo-bar"><span class="fill w-100"></span></span><span class="demo-val">181,603</span></div>
+              <div class="demo-row"><span>Organic Search</span><span class="demo-bar"><span class="fill w-60"></span></span><span class="demo-val">109,005</span></div>
+              <div class="demo-row"><span>Direct</span><span class="demo-bar"><span class="fill w-12"></span></span><span class="demo-val">22,643</span></div>
+              <div class="demo-row"><span>Unknown</span><span class="demo-bar"><span class="fill w-12"></span></span><span class="demo-val">21,266</span></div>
+              <div class="demo-row"><span>Paid Search</span><span class="demo-bar"><span class="fill w-2"></span></span><span class="demo-val">3,114</span></div>
+            </div>
+          </div>
+          <figcaption id="demo-caption" class="demo-caption">A real answer from the Google Merchandise Store sample data (Nov 2020 to Jan 2021).</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section id="how" class="intro-section">
+      <div class="intro-wrap">
+        <h2 class="intro-h2">How it works</h2>
+        <ol class="steps-grid">
+          <li class="card step-card">
+            <span class="step-num" aria-hidden="true">1</span>
+            <h3>Ask</h3>
+            <p>Type a question in everyday words, or pick one of the examples. Mention a channel or time period if it matters.</p>
+          </li>
+          <li class="card step-card">
+            <span class="step-num" aria-hidden="true">2</span>
+            <h3>It looks it up</h3>
+            <p>An AI assistant finds the right tables and writes the queries. Every query is checked for safety before it runs, and it only reads data your access allows.</p>
+          </li>
+          <li class="card step-card">
+            <span class="step-num" aria-hidden="true">3</span>
+            <h3>You get an answer</h3>
+            <p>A short summary with the key figures, a chart when it helps, and the numbers as a table. "How was this worked out?" shows the exact queries.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- Two kinds of answers -->
+    <section class="intro-section alt">
+      <div class="intro-wrap">
+        <h2 class="intro-h2">Quick answers, or a full analysis</h2>
+        <p class="intro-lede">Ask for a figure and you get it in seconds. Ask why, or what to do about it, and you get a report you can act on.</p>
+        <div class="kinds-grid">
+          <article class="card kind-card">
+            <h3>Quick answer <span class="kind-time">about 20 seconds</span></h3>
+            <p>One figure, comparison or trend, with a chart.</p>
+            <p class="kind-example">"What was the conversion rate on mobile compared with desktop?"</p>
+          </article>
+          <article class="card kind-card">
+            <h3>Analysis report <span class="kind-time">about 2 minutes</span></h3>
+            <p>It breaks the numbers down, checks its own conclusions, and writes up:</p>
+            <ul class="check-list">
+              <li>Key findings, each with its figures</li>
+              <li>Why it's happening, marked <span class="tag tag-supported">Supported by data</span>, <span class="tag tag-likely">Likely</span> or <span class="tag tag-hypothesis">Hypothesis</span></li>
+              <li>Recommendations ranked by impact and effort, each with how to measure success</li>
+              <li>Caveats about what the data can't show</li>
+            </ul>
+          </article>
+        </div>
+        <blockquote class="card quote-card">
+          <p>"Mobile actually converts slightly better than desktop, not worse: 1.39% of 143,185 mobile sessions purchased vs 1.31% of 208,942 desktop sessions… Mobile's remaining weakness is basket value, not conversion."</p>
+          <footer>From a real analysis report on the sample data. It checked the question's assumption before answering it.</footer>
+        </blockquote>
+      </div>
+    </section>
+
+    <!-- Use it in your work -->
+    <section class="intro-section">
+      <div class="intro-wrap">
+        <h2 class="intro-h2">Made for the work you already do</h2>
+        <div class="uses-grid">
+          <div class="use"><h3>Copy into email or docs</h3><p>The answer, its figures and a reference, ready to paste.</p></div>
+          <div class="use"><h3>Open in Excel or Sheets</h3><p>Download the numbers behind any chart as a CSV file.</p></div>
+          <div class="use"><h3>Drop into slides</h3><p>Download a titled, high-resolution chart image.</p></div>
+          <div class="use"><h3>Share a report</h3><p>Print an analysis or save it as a PDF.</p></div>
+          <div class="use"><h3>Send to a colleague</h3><p>Copy a link that opens the same question for them.</p></div>
+          <div class="use"><h3>Pick up where you left off</h3><p>Your recent questions stay in the sidebar.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Security -->
+    <section id="safe" class="intro-section alt">
+      <div class="intro-wrap">
+        <h2 class="intro-h2">Safe by design</h2>
+        <div class="safe-grid">
+          <div class="card safe-card"><h3>Read-only</h3><p>It can read your data but never change or delete it.</p></div>
+          <div class="card safe-card"><h3>Only what you're allowed to see</h3><p>Each person sees only the datasets their role allows. Personal contact details are blocked.</p></div>
+          <div class="card safe-card"><h3>Shows its working</h3><p>Every number comes from a query result, and you can see the queries behind each answer.</p></div>
+          <div class="card safe-card"><h3>No passwords or keys</h3><p>People sign in with their Google account. The app only receives their name and email.</p></div>
+          <div class="card safe-card"><h3>Everything is logged</h3><p>Each question is recorded with who asked it, what ran and what it cost.</p></div>
+          <div class="card safe-card"><h3>Costs you can see</h3><p>Every question's cost is on your Usage page, and limits stop a bill from running away.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pricing -->
+    <section class="intro-section">
+      <div class="intro-wrap pricing-teaser">
+        <div>
+          <h2 class="intro-h2">Simple, transparent pricing</h2>
+          <p class="intro-lede">Choose a monthly subscription or pay as you go. Prices come from what each question actually costs, and you can switch or cancel at any time.</p>
+        </div>
+        <a class="btn btn-secondary hero-btn" href="/plans">See plans and pricing</a>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="intro-section alt">
+      <div class="intro-wrap faq">
+        <h2 class="intro-h2">Questions people ask</h2>
+        <details class="disclosure faq-item"><summary>Do I need to know SQL or data tools?</summary><p>No. Ask in plain English. The assistant writes and checks the queries for you, and you can look at them if you're curious.</p></details>
+        <details class="disclosure faq-item"><summary>What data can it see?</summary><p>Only the datasets your admin gives your role. It can't query anything else, and personal contact details are always blocked.</p></details>
+        <details class="disclosure faq-item"><summary>How accurate are the answers?</summary><p>Every number comes from a query on your data, and each answer shows the queries behind it. Reports mark which reasons the data supports and which are hypotheses. Still, check important numbers before sharing them widely.</p></details>
+        <details class="disclosure faq-item"><summary>Can it answer anything else?</summary><p>No. It only answers questions about your marketing data, and declines anything else.</p></details>
+        <details class="disclosure faq-item"><summary>How do I get access?</summary><p>Sign in with your work Google account. If you haven't been added yet, you'll see how to ask your admin.</p></details>
+      </div>
+    </section>
+
+    <!-- Final call to action -->
+    <section class="intro-cta">
+      <div class="intro-wrap cta-inner">
+        <h2 class="intro-h2">Ask your first question</h2>
+        <p class="intro-lede">It takes a minute to get started.</p>
+        <a class="btn btn-primary hero-btn" href="/?signin=1">Get started</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p><a href="/plans">Plans and pricing</a> · <a href="/static/terms.html">Acceptable use</a> · Answers are written by an AI model from queries on your data. Check important numbers before sharing them widely.</p>
+  </footer>
+</body>
+</html>

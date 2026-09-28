@@ -1565,6 +1565,21 @@ function renderAdminUsage(all) {
 
 // ---------- start ----------
 
+const INTRO_SEEN = "mkt.introSeen";
+
+// First visit from a browser that isn't signed in: show the intro page once.
+// Never for shared question links, returns from Google sign-in, or "Sign in" clicks.
+function shouldShowIntro(params) {
+  if (params.has("q") || params.has("signin_error") || params.has("signin")) return false;
+  try {
+    if (localStorage.getItem(INTRO_SEEN)) return false;
+    localStorage.setItem(INTRO_SEEN, "1");
+    return true;
+  } catch {
+    return false; // storage blocked: don't risk a redirect loop
+  }
+}
+
 async function start() {
   const params = new URLSearchParams(location.search);
   const signinError = params.get("signin_error");
@@ -1612,6 +1627,14 @@ async function start() {
     }
   }
 
+  if (!signinError && shouldShowIntro(params)) {
+    location.replace("/welcome");
+    return;
+  }
+  if (params.has("signin")) {
+    params.delete("signin");
+    history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : "") + location.hash);
+  }
   showSignin({
     clearKey: false,
     alert: signinError ? SIGNIN_ERRORS[signinError] || SIGNIN_ERRORS.failed : null,
