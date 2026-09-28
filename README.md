@@ -183,7 +183,10 @@ analytics) and/or [seed the sandbox datasets](#sandbox-data).
 
 ## Web app
 
-For people who don't use the command line, the API serves a browser app at `/`. Give
+For people who don't use the command line, the API serves a browser app at `/`,
+with a public intro page at `/welcome` (what it does, how it works, answer types,
+security, a pricing pointer and FAQ). A browser that isn't signed in is shown the
+intro once; shared question links and returns from sign-in never are. Give
 people the site's address; nothing needs installing, and nobody handles a key or
 password for this app.
 
@@ -397,6 +400,7 @@ web app they're under *Sign in with an access key instead*.
 - `GET /whoami`: shows the user, role and datasets for an API key or signed-in session.
 - `GET /usage`: the caller's plan, limits and usage this month; `GET /usage/all`:
   everyone's, for admins.
+- `GET /welcome`: public intro page.
 - `GET /plans` (page) and `GET /plans/catalog` (JSON): public plans and pricing.
 - `POST /plan`, `POST /plan/cancel`, `POST /plan/resume`: change, quit or keep a plan
   (see [Plans and usage](#plans-and-usage)).
@@ -662,7 +666,7 @@ Each feature was built on its own branch, each based on the previous one:
 → `feature/ask-endpoint` → `feature/hardening` → `feature/web-ui` →
 `feature/ui-restyle` → `feature/google-sign-in` → `feature/plans-and-usage` →
 `feature/abuse-protection` → `feature/plan-management` → `feature/analysis-reports` →
-`feature/pricing-page`.
+`feature/pricing-page` → `feature/intro-page`.
 
 ## Known limitations
 
