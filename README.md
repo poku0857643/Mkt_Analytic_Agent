@@ -288,8 +288,18 @@ TRUSTED_PROXY_HOPS=1               # on Cloud Run, so the real client IP is used
   question history. Admins (`USAGE_ADMIN_ROLES`) also see everyone's usage this month
   (`GET /usage/all`).
 
+**Plans and pricing page** (`/plans`, public, linked from sign-in; also the *Plans*
+tab in the app): every plan's price, what it includes, its limits and how to cancel;
+what a typical quick answer (~6¢) and analysis report (~32¢) cost on each plan; how
+usage is measured, with the list prices used; and the fair-use limits on every plan.
+It is rendered from `GET /plans/catalog`, which reads the live settings, so the page
+always matches what the app enforces. Signed-in people see their current plan marked
+and can switch from there.
+
 Costs are estimates, not invoices, and no payment is taken: connect a billing
-provider (for example Stripe) to charge subscriptions and pay-as-you-go amounts.
+provider (for example Stripe) to charge subscriptions and pay-as-you-go amounts, then
+set `BILLING_ENABLED=true`. Until then the plans page says plainly that nobody is
+charged.
 
 ## Using the API
 
@@ -387,6 +397,7 @@ web app they're under *Sign in with an access key instead*.
 - `GET /whoami`: shows the user, role and datasets for an API key or signed-in session.
 - `GET /usage`: the caller's plan, limits and usage this month; `GET /usage/all`:
   everyone's, for admins.
+- `GET /plans` (page) and `GET /plans/catalog` (JSON): public plans and pricing.
 - `POST /plan`, `POST /plan/cancel`, `POST /plan/resume`: change, quit or keep a plan
   (see [Plans and usage](#plans-and-usage)).
 - `GET /auth/login`, `GET /auth/callback`, `GET /auth/session`, `POST /auth/logout`:
@@ -430,6 +441,7 @@ values must be valid JSON.
 | `PRICE_INPUT_PER_MTOK` / `PRICE_OUTPUT_PER_MTOK` | `5.00` / `25.00` | Claude list prices per million tokens (claude-opus-5) |
 | `PRICE_CACHE_READ_PER_MTOK` / `PRICE_CACHE_WRITE_PER_MTOK` | `0.50` / `6.25` | Prompt-cache read / write prices |
 | `PRICE_BIGQUERY_PER_TIB` | `6.25` | BigQuery on-demand price per TiB scanned |
+| `BILLING_ENABLED` | `false` | Whether a payment provider charges people; while false, the plans page says nobody is charged |
 | `SUBSCRIPTION_FEE_USD` / `SUBSCRIPTION_MONTHLY_ALLOWANCE_USD` | `20.00` / `25.00` | Monthly fee shown to subscribers, and usage it includes |
 | `PAYG_MARKUP` / `PAYG_MONTHLY_LIMIT_USD` | `1.2` / `100.00` | Pay-as-you-go price multiplier, and monthly cap |
 | `FREEMIUM_ENABLED` | `false` | Give unenrolled Google users a free trial |

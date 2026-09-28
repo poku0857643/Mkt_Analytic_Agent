@@ -305,7 +305,7 @@ function showApp() {
   resetView();
   $("who-plan").textContent = PLAN_LABELS[state.user.plan] || "";
   refreshPlan();
-  showView(location.hash === "#usage" ? "usage" : "ask");
+  showView(viewFromHash());
 
   const q = new URLSearchParams(location.search).get("q");
   if (q) $("question").value = q.slice(0, QUESTION_MAX);
@@ -1087,20 +1087,31 @@ function formatDay(iso) {
   return new Date(iso + (iso.length === 10 ? "T00:00:00Z" : "")).toLocaleDateString(LOCALE, { day: "numeric", month: "short", timeZone: "UTC" });
 }
 
+const VIEW_HASH = { ask: "", usage: "#usage", plans: "#plans" };
+
+function viewFromHash() {
+  return location.hash === "#usage" ? "usage" : location.hash === "#plans" ? "plans" : "ask";
+}
+
 function showView(name) {
   state.view = name;
   $("ask-view").hidden = name !== "ask";
   $("usage-view").hidden = name !== "usage";
+  $("plans-view").hidden = name !== "plans";
   // Recent questions belong with asking; the usage page has its own history.
   $("sidebar").hidden = name !== "ask";
   $("app").classList.toggle("single", name !== "ask");
-  $("tab-ask").toggleAttribute("aria-current", name === "ask");
-  $("tab-usage").toggleAttribute("aria-current", name === "usage");
-  if (name === "ask") $("tab-ask").setAttribute("aria-current", "page");
-  else $("tab-usage").setAttribute("aria-current", "page");
-  history.replaceState(null, "", location.pathname + location.search + (name === "usage" ? "#usage" : ""));
+  for (const view of ["ask", "usage", "plans"]) {
+    const tab = $("tab-" + view);
+    if (view === name) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  }
+  history.replaceState(null, "", location.pathname + location.search + VIEW_HASH[name]);
   if (name === "usage") {
     loadUsagePage();
+  } else if (name === "plans") {
+    disposeUsageChart();
+    loadPlansView();
   } else {
     disposeUsageChart();
     if (state.chart) state.chart.resize();
@@ -1109,12 +1120,13 @@ function showView(name) {
 
 // Back/forward and #usage links switch sections too.
 window.addEventListener("hashchange", () => {
-  const view = location.hash === "#usage" ? "usage" : "ask";
+  const view = viewFromHash();
   if (!$("app").hidden && view !== state.view) showView(view);
 });
 
 $("tab-ask").addEventListener("click", () => showView("ask"));
 $("tab-usage").addEventListener("click", () => showView("usage"));
+$("tab-plans").addEventListener("click", () => showView("plans"));
 $("trial-usage").addEventListener("click", () => showView("usage"));
 $("plan-note-btn").addEventListener("click", () => showView("usage"));
 $("problem-usage").addEventListener("click", () => showView("usage"));
@@ -1361,6 +1373,65 @@ async function runPlanAction(path, body, done) {
   }
   setTimeout(() => { if (toastEl.textContent === done) toastEl.textContent = ""; }, 5000);
 }
+
+// ---------- plans tab ----------
+
+let pendingPlansChoice = null;
+
+async function loadPlansView() {
+  const root = $("plans-view-root");
+  let catalog;
+  try {
+    [catalog] = await Promise.all([api("/plans/catalog", { key: null }), refreshPlan()]);
+  } catch {
+    root.replaceChildren();
+    const p = document.createElement("p");
+    p.className = "alert alert-error";
+    p.textContent = "Plans couldn't be loaded. Try again in a moment.";
+    root.append(p);
+    return;
+  }
+  if (state.view !== "plans") return;
+  const report = state.usage;
+  renderPlanCatalog(root, catalog, {
+    current: report ? { plan: report.plan.id, state: report.plan.state, canChange: report.can_change_plan } : null,
+    onChoose: (planId) => {
+      const plan = catalog.plans.find((p) => p.id === planId);
+      const none = !report || report.plan.state === "none";
+      pendingPlansChoice = planId;
+      $("plans-confirm-title").textContent = none ? `Start ${plan.name}?` : `Switch to ${plan.name}?`;
+      $("plans-confirm-text").textContent = `${plan.name}: ${plan.price} ${plan.price_unit}. This starts now` +
+        (report && report.plan.id === "subscription" && report.plan.state !== "none" ? " and your subscription ends today." : ".");
+      $("plans-confirm-yes").textContent = none ? `Start ${plan.name}` : "Switch plan";
+      $("plans-confirm").hidden = false;
+      $("plans-confirm").scrollIntoView({ block: "center" });
+      $("plans-confirm-yes").focus();
+    },
+  });
+}
+
+$("plans-confirm-no").addEventListener("click", () => {
+  pendingPlansChoice = null;
+  $("plans-confirm").hidden = true;
+});
+
+$("plans-confirm-yes").addEventListener("click", async () => {
+  const planId = pendingPlansChoice;
+  pendingPlansChoice = null;
+  $("plans-confirm").hidden = true;
+  if (!planId) return;
+  const toastEl = $("plans-toast");
+  try {
+    await api("/plan", { method: "POST", body: { plan: planId } });
+    try { state.user = await api("/whoami"); } catch {}
+    await loadPlansView();
+    toastEl.style.color = "";
+    toastEl.textContent = `You're now on ${PLAN_LABELS[planId]}.`;
+  } catch (err) {
+    toastEl.style.color = "var(--error)";
+    toastEl.textContent = err instanceof ApiError && err.detail ? err.detail : "Couldn't change your plan. Try again.";
+  }
+});
 
 function usageMetric(report) {
   const payg = report.plan.id === "payg";

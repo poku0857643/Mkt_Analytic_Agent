@@ -65,6 +65,25 @@ def price(
     return Cost(llm, bigquery)
 
 
+# Typical token use per question, measured on 2026-09-28 with claude-opus-5 at
+# effort "high" (see README "Latency and cost"). Used to show example prices on
+# the plans page; they're priced with the current PRICE_* settings.
+TYPICAL_QUESTIONS = {
+    "lookup": {
+        "label": "Quick answer",
+        "description": "One figure, comparison or trend, with a chart. About 20 seconds.",
+        "usage": {"cache_read_tokens": 8_000, "cache_write_tokens": 5_000, "output_tokens": 1_000,
+                  "bytes_processed": 5 * 2**20},
+    },
+    "report": {
+        "label": "Analysis report",
+        "description": "Findings, reasons and recommendations from several breakdowns. About 2 minutes.",
+        "usage": {"cache_read_tokens": 57_000, "cache_write_tokens": 13_400, "output_tokens": 8_300,
+                  "bytes_processed": 55 * 2**20},
+    },
+}
+
+
 def charge(plan: str, cost_usd: float, settings: Settings) -> float:
     """What the person pays for one question on their plan."""
     return cost_usd * settings.payg_markup if plan == "payg" else 0.0

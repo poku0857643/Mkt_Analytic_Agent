@@ -8,6 +8,7 @@
   <link rel="preload" href="/static/vendor/inter/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/vendor/echarts/echarts.min.js" defer></script>
+  <script src="/static/plans.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -25,6 +26,7 @@
       <nav id="views" class="views" aria-label="Sections" hidden>
         <button id="tab-ask" type="button" class="view-tab" aria-current="page">Ask</button>
         <button id="tab-usage" type="button" class="view-tab">Usage</button>
+        <button id="tab-plans" type="button" class="view-tab">Plans</button>
       </nav>
       <nav id="account" class="account" aria-label="Account" hidden>
         <span id="who-plan" class="plan-pill"></span>
@@ -62,6 +64,7 @@
         <p class="signin-note">Use your work Google account. The app only receives your name and email address; you never share a password or key with it.</p>
         <p class="signin-note">New here? Just continue. If you don't have access yet, you'll see how to get it.</p>
         <p class="signin-note">By continuing, you agree to the <a href="/static/terms.html" target="_blank" rel="noopener">acceptable use terms</a>.</p>
+        <p class="signin-note"><a href="/plans">See plans and pricing</a></p>
       </div>
 
       <details id="key-option" class="disclosure key-option">
@@ -247,6 +250,21 @@
         <div id="dataset-list" class="dataset-grid"></div>
       </section>
      </div>
+
+     <section id="plans-view" class="plans-view" hidden aria-labelledby="plans-title" tabindex="-1">
+      <h1 id="plans-title" class="page-title">Plans and pricing</h1>
+      <p class="page-sub">What each plan includes and exactly how questions are priced. Your own usage is on the Usage tab.</p>
+      <div id="plans-confirm" class="card confirm" hidden>
+        <p id="plans-confirm-title" class="confirm-title"></p>
+        <p id="plans-confirm-text" class="muted"></p>
+        <div class="confirm-actions">
+          <button id="plans-confirm-yes" type="button" class="btn btn-primary btn-sm"></button>
+          <button id="plans-confirm-no" type="button" class="btn btn-secondary btn-sm">Not now</button>
+        </div>
+      </div>
+      <p id="plans-toast" class="toast" role="status" aria-live="polite"></p>
+      <div id="plans-view-root"><p class="muted">Loading plans…</p></div>
+     </section>
 
      <section id="usage-view" class="usage" hidden aria-labelledby="usage-title" tabindex="-1">
       <h1 id="usage-title" class="page-title">Usage</h1>

@@ -25,6 +25,7 @@ from app.mcp_server import build_server
 from app.usage import (
     PLAN_NAMES,
     SELF_SERVE_PLANS,
+    TYPICAL_QUESTIONS,
     UsageRow,
     UsageStore,
     cancel_plan,
@@ -62,7 +63,7 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     # Question text can appear in UI links (?q=); don't leak it to other sites.
     response.headers["Referrer-Policy"] = "no-referrer"
-    if request.url.path == "/" or request.url.path.startswith("/static/"):
+    if request.url.path in ("/", "/plans") or request.url.path.startswith("/static/"):
         response.headers["Content-Security-Policy"] = UI_CSP
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Cache-Control"] = "no-cache"
@@ -127,6 +128,12 @@ app.include_router(google_auth_router)
 async def web_ui():
     """Browser UI for non-technical users; it calls /whoami and /ask."""
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/plans", include_in_schema=False)
+async def plans_page():
+    """Public plans and pricing page; the same content is a tab in the web app."""
+    return FileResponse(STATIC_DIR / "plans.html")
 
 
 @app.get("/health")
@@ -520,3 +527,115 @@ async def resume_subscription(
     choose_plan(user.user, "subscription", usage, now)
     _audit_plan(audit, user, "resume subscription")
     return {"plan": "subscription", **plan_status(user.user, "subscription", usage, now)}
+
+
+# Plans and pricing (public)
+
+
+def _about(amount: float, unit_cost: float) -> int:
+    """How many questions an amount buys, rounded down to 2 significant figures."""
+    n = int(amount / unit_cost) if unit_cost else 0
+    if n >= 100:
+        step = 10 ** (len(str(n)) - 2)
+        n = n // step * step
+    return n
+
+
+@app.get("/plans/catalog")
+async def plans_catalog(settings: Annotated[Settings, Depends(get_settings)]):
+    """Everything the plans page shows, computed from the live settings. No sign-in needed."""
+    examples = []
+    for key, typical in TYPICAL_QUESTIONS.items():
+        cost = price(settings, **typical["usage"]).total_usd
+        examples.append({
+            "id": key,
+            "label": typical["label"],
+            "description": typical["description"],
+            "cost_usd": round(cost, 4),
+            "payg_usd": round(cost * settings.payg_markup, 4),
+        })
+    lookup = next(e["cost_usd"] for e in examples if e["id"] == "lookup")
+    report = next(e["cost_usd"] for e in examples if e["id"] == "report")
+    allowance = settings.subscription_monthly_allowance_usd
+    cap = settings.payg_monthly_limit_usd
+    markup_pct = round((settings.payg_markup - 1) * 100)
+
+    plans = [
+        {
+            "id": "subscription",
+            "name": PLAN_NAMES["subscription"],
+            "price": f"${settings.subscription_fee_usd:,.2f}",
+            "price_unit": "per month",
+            "best_for": "Regular use by people who ask questions every week.",
+            "includes": [
+                f"${allowance:,.2f} of usage every month, at cost",
+                f"About {_about(allowance, lookup):,} quick answers or {_about(allowance, report):,} analysis reports a month",
+                "All datasets your role can use",
+                "Usage page with every question's cost",
+            ],
+            "limits": [
+                "Questions pause when the month's included usage is used up, until the 1st",
+                "Unused usage doesn't carry over",
+            ],
+            "cancel": "Cancel any time. It keeps working until the end of the month, and you can undo it until then.",
+        },
+        {
+            "id": "payg",
+            "name": PLAN_NAMES["payg"],
+            "price": f"Cost + {markup_pct}%" if markup_pct else "At cost",
+            "price_unit": "per question",
+            "best_for": "Occasional use, or months when you need more than a subscription includes.",
+            "includes": [
+                f"About ${examples[0]['payg_usd']:,.2f} per quick answer, ${examples[1]['payg_usd']:,.2f} per analysis report",
+                "No monthly fee",
+                "All datasets your role can use",
+                "Usage page with every question's cost",
+            ],
+            "limits": [
+                f"Spending cap of ${cap:,.2f} a month, so a bill can't run away" if cap is not None else "No monthly spending cap",
+            ],
+            "cancel": "Stop any time. It stops at once, and you only pay for questions already asked.",
+        },
+    ]
+    if settings.freemium_enabled:
+        plans.append({
+            "id": "freemium",
+            "name": PLAN_NAMES["freemium"],
+            "price": "Free",
+            "price_unit": (f"for {settings.freemium_trial_days} days" if settings.freemium_trial_days else "while trials are open"),
+            "best_for": "Trying the assistant before your team signs up.",
+            "includes": [
+                f"{settings.freemium_daily_questions} questions a day, up to ${settings.freemium_daily_cost_usd:,.2f} of usage",
+                "Sample data only (" + ", ".join(settings.freemium_datasets) + "), never company data",
+            ],
+            "limits": [
+                f"{settings.freemium_ip_daily_questions} free questions a day per network, shared by all trial accounts",
+                "Sign in with Google; some accounts or networks may not be eligible",
+            ],
+            "cancel": "Nothing to cancel. Ask an admin to add you to keep going after the trial.",
+        })
+
+    return {
+        "currency": "USD",
+        "billing_enabled": settings.billing_enabled,
+        "plans": plans,
+        "examples": examples,
+        "prices": {
+            "model": settings.agent_model,
+            "input_per_mtok": settings.price_input_per_mtok,
+            "output_per_mtok": settings.price_output_per_mtok,
+            "cache_read_per_mtok": settings.price_cache_read_per_mtok,
+            "cache_write_per_mtok": settings.price_cache_write_per_mtok,
+            "bigquery_per_tib": settings.price_bigquery_per_tib,
+            "payg_markup": settings.payg_markup,
+        },
+        "fair_use": [
+            f"{settings.ask_rate_limit_per_minute} questions a minute and one question at a time per person",
+            *([f"{settings.ask_daily_question_limit} questions per person per day"] if settings.ask_daily_question_limit else []),
+            f"Questions pause until midnight UTC after {settings.declined_daily_limit} requests in a day that aren't about the data",
+            # Upper bound: every token priced at the most expensive (output) rate.
+            *([f"One question can use at most {settings.agent_max_tokens_per_question:,} tokens, so it can never cost "
+               f"more than ${price(settings, output_tokens=settings.agent_max_tokens_per_question).total_usd:,.2f}"]
+              if settings.agent_max_tokens_per_question else []),
+        ],
+    }

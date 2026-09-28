@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     price_cache_write_per_mtok: float = 6.25
     price_bigquery_per_tib: float = 6.25
 
+    # Whether a payment provider actually charges people. While false, the plans
+    # page says plainly that plans and usage are tracked but nobody is charged.
+    billing_enabled: bool = False
+
     # Subscription: a flat monthly fee that includes this much usage (at cost).
     subscription_fee_usd: float = 20.00
     subscription_monthly_allowance_usd: float = 25.00
